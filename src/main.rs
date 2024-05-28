@@ -1,41 +1,48 @@
-use std::net::{TcpListener, TcpStream};
+// use std::net::{TcpListener, TcpStream};
 use std::io::{ErrorKind, Read, Write};
 use std::time::{Instant, Duration};
 use std::thread;
+use tokio::net::{TcpListener, TcpStream};
+use std::error::Error;
+use tokio::io::{self, AsyncReadExt, Interest};
 
-fn handle_client(mut stream: TcpStream) {
-    stream.set_read_timeout(Some(Duration::from_millis(500))).expect("set stream read timeout");
+async fn process_socket(mut stream: TcpStream) {
     let start = Instant::now();
     println!("Connection made");
     let mut bytes = [0; 8];
 
     let mut count = 0;
+
     loop {
-        // let mut bytes = vec![0];
-        let resp = stream.read_exact(&mut bytes);
-        if let Some(e) = resp.err() {
-            let end = Instant::now();
-            println!("{} messages received in {}s", count, (end - start).as_millis() as f64 / 1000.0);
-            if e.kind() == ErrorKind::UnexpectedEof {
-                println!("Disconnected");
-                return
-            } else {
-                panic!("Unexpected error {:?}", e);
+        match stream.try_read(&mut bytes) {
+            Ok(bytes_written) => {
+                if bytes_written == 0 {
+                    let end = Instant::now();
+                    println!("{} messages received in {}s", count, (end - start).as_millis() as f64 / 1000.0);
+                    println!("Disconnected");
+                    return
+                }
+                count += 1;
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                continue;
+            }
+            Err(e) => {
+                panic!("{:?}", e)
             }
         }
-        count += 1;
     }
-
-    
 }
 
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    let listener = TcpListener::bind("127.0.0.1:1996").await?;
 
-fn main() -> std::io::Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:1996")?;
-
-    // accept connections and process them serially
-    for stream in listener.incoming() {
-        thread::spawn(|| handle_client(stream.unwrap()));
+    loop {
+        let (socket, addr) = listener.accept().await?;
+        tokio::spawn(async move {
+            process_socket(socket).await;
+        });
+        
     }
-    Ok(())
 }
