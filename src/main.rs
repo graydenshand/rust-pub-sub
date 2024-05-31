@@ -6,7 +6,10 @@ use tokio::net::{TcpListener, TcpStream};
 use std::error::Error;
 use tokio::io::{self, AsyncReadExt, Interest};
 
-async fn process_socket(mut stream: TcpStream) {
+mod datagram;
+mod subscription_tree;
+
+async fn process_socket(stream: TcpStream) {
     let start = Instant::now();
     println!("Connection made");
     let mut bytes = [0; 8];
