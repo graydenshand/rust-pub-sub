@@ -1,3 +1,6 @@
+mod subscription_tree;
+
+
 use tonic::{transport::Server, Request, Response, Status};
 
 use hello_world::greeter_server::{Greeter, GreeterServer};

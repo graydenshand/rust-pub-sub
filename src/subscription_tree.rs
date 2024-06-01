@@ -1,19 +1,18 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::clone::Clone;
-use std::fmt::Debug;
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::str::Chars;
 use std::iter::Peekable;
 
 #[derive(Debug)]
-struct Node<T: Clone + Debug + Eq + Hash> {
+struct Node<T: Clone + Eq + Hash> {
     token: Option<char>,
     children: HashMap<char, Node<T>>,
     items: Vec<T>
 }
-impl<T> Node<T> where T: Clone + Debug + Eq + Hash {
+impl<T> Node<T> where T: Clone + Eq + Hash {
     fn new(token: Option<char>) -> Node<T> {
         Node {
             token,
@@ -31,10 +30,10 @@ impl<T> Node<T> where T: Clone + Debug + Eq + Hash {
 }
 
 
-struct SubscriptionTree<T: Clone + Debug + Eq + Hash>{
+struct SubscriptionTree<T: Clone + Eq + Hash>{
     root: Node<T>,
 }
-impl<T> SubscriptionTree<T> where T: Clone + Debug + Eq + Hash {
+impl<T> SubscriptionTree<T> where T: Clone + Eq + Hash {
 
     /// Create a new, empty tree
     fn new() -> SubscriptionTree<T> {
@@ -112,6 +111,7 @@ mod tests {
         let mut st = SubscriptionTree::new();
         st.subscribe("metrics", &0);
         st.subscribe("*", &1);
+        st.subscribe("met*ic", &2);
         let key = char::from_str("m").unwrap();
         st.root.children.get(&key).expect("exists");
         assert!(st.get_subscribers("test") == HashSet::from([&1]));
