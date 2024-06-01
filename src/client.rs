@@ -14,12 +14,9 @@ fn main() -> std::io::Result<()> {
     let mut stream = TcpStream::connect("127.0.0.1:1996")?;
     loop {
         let val = Value::from(i);
-        println!("{:?}", val);
+        // println!("{:?}", val);
         encode::write_value(&mut stream, &val).unwrap();
         i +=1;
-        if i > 255000 {
-            break
-        }
     }
     Ok(())
 }

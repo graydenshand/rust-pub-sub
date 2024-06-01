@@ -8,6 +8,7 @@ use std::error::Error;
 use tokio::io::{self, AsyncReadExt, Interest};
 use rmp_serde;
 use rmpv::{Value, decode};
+use tokio::time::timeout;
 
 mod datagram;
 mod subscription_tree;
@@ -44,7 +45,7 @@ impl Connection {
 
     pub async fn read_value(&mut self)
         -> Result<Option<Value>, Box<dyn Error>>
-    {
+    {   
         loop {
             // Attempt to parse a frame from the buffered data. If
             // enough data has been buffered, the frame is
@@ -60,7 +61,9 @@ impl Connection {
             //
             // On success, the number of bytes is returned. `0`
             // indicates "end of stream".
-            if 0 == self.stream.read_buf(&mut self.buffer).await? {
+            self.stream.readable().await?;
+            let bytes_read = self.stream.read_buf(&mut self.buffer).await?;
+            if bytes_read == 0 {
                 // The remote closed the connection. For this to be
                 // a clean shutdown, there should be no data in the
                 // read buffer. If there is, this means that the
@@ -83,19 +86,18 @@ async fn process_socket(stream: TcpStream) -> Result<(), Box<dyn Error>> {
     let mut count = 0;
 
     loop {
-        let value = connection.read_value().await?;
-
-        match value {
-            Some(v) => {
-                println!("{:?}", v);
-            },
-            None => {
-                let end = Instant::now();
-                println!("{} messages received in {}s", count, (end - start).as_millis() as f64 / 1000.0);
-                println!("Disconnected");
-                return Ok(())
-            }
+        let value = connection.read_value().await;
+        if value.is_err() || value.as_ref().unwrap().is_none() {
+            let end = Instant::now();
+            let seconds = (end - start).as_millis() as f64 / 1000.0;
+            println!("{} messages received in {}s - {} m/s", count, seconds, (count as f64 / seconds).round());
+            println!("Disconnected");
+            return Ok(())
+        } else {
+            // Do something with the value
+            // println!("{:?}", value?.unwrap());
         }
+
         count += 1;
     }
 }
