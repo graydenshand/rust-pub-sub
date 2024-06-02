@@ -1,10 +1,9 @@
 mod subscription_tree;
 
-
 use tonic::{transport::Server, Request, Response, Status};
 
 use hello_world::greeter_server::{Greeter, GreeterServer};
-use hello_world::{HelloReply, HelloRequest, Datagram};
+use hello_world::{Datagram, HelloReply, HelloRequest};
 
 pub mod hello_world {
     tonic::include_proto!("helloworld"); // The string specified here must match the proto package name
@@ -18,7 +17,8 @@ impl Greeter for MyGreeter {
     async fn say_hello(
         &self,
         request: Request<HelloRequest>, // Accept request of type HelloRequest
-    ) -> Result<Response<HelloReply>, Status> { // Return an instance of type HelloReply
+    ) -> Result<Response<HelloReply>, Status> {
+        // Return an instance of type HelloReply
         println!("Got a request: {:?}", request);
 
         let reply = hello_world::HelloReply {
@@ -31,16 +31,16 @@ impl Greeter for MyGreeter {
     async fn add_one(
         &self,
         request: Request<Datagram>, // Accept request of type HelloRequest
-    ) -> Result<Response<Datagram>, Status> { // Return an instance of type HelloReply
+    ) -> Result<Response<Datagram>, Status> {
+        // Return an instance of type HelloReply
         println!("Got a request: {:?}", request);
         let reply = hello_world::Datagram {
-            values: request.into_inner().values.iter().map(|x| x+1.).collect(),
+            values: request.into_inner().values.iter().map(|x| x + 1.).collect(),
         };
 
         Ok(Response::new(reply)) // Send back our formatted greeting
     }
 }
-
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

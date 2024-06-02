@@ -1,18 +1,21 @@
-use std::collections::HashMap;
-use std::str::FromStr;
 use std::clone::Clone;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::hash::Hash;
-use std::str::Chars;
 use std::iter::Peekable;
+use std::str::Chars;
+use std::str::FromStr;
 
 #[derive(Debug)]
 struct Node<T: Clone + Eq + Hash> {
     token: Option<char>,
     children: HashMap<char, Node<T>>,
-    items: Vec<T>
+    items: Vec<T>,
 }
-impl<T> Node<T> where T: Clone + Eq + Hash {
+impl<T> Node<T>
+where
+    T: Clone + Eq + Hash,
+{
     fn new(token: Option<char>) -> Node<T> {
         Node {
             token,
@@ -25,27 +28,27 @@ impl<T> Node<T> where T: Clone + Eq + Hash {
         if let Some(c) = child.token {
             self.children.insert(c, child);
         }
-        
     }
 }
 
-
-struct SubscriptionTree<T: Clone + Eq + Hash>{
+struct SubscriptionTree<T: Clone + Eq + Hash> {
     root: Node<T>,
 }
-impl<T> SubscriptionTree<T> where T: Clone + Eq + Hash {
-
+impl<T> SubscriptionTree<T>
+where
+    T: Clone + Eq + Hash,
+{
     /// Create a new, empty tree
     fn new() -> SubscriptionTree<T> {
         SubscriptionTree {
-            root: Node::new(None)
+            root: Node::new(None),
         }
     }
 
     /// Add a subscription to the tree
     fn subscribe(&mut self, pattern: &str, id: T) {
         let mut cursor = &mut self.root;
-        let mut exists : bool;
+        let mut exists: bool;
         for c in pattern.chars() {
             // This weird pattern was used to get around a borrow checker error trying
             // to mutable borrow the cursor node twice at the same time inside a match statement
@@ -66,7 +69,11 @@ impl<T> SubscriptionTree<T> where T: Clone + Eq + Hash {
         cursor.items.push(id);
     }
 
-    fn collect_subscribers(mut chars: Peekable<Chars>, subscribers: &mut HashSet<T>, node: &Node<T>) {
+    fn collect_subscribers(
+        mut chars: Peekable<Chars>,
+        subscribers: &mut HashSet<T>,
+        node: &Node<T>,
+    ) {
         let next = chars.next();
 
         let wildcard = node.children.get(&char::from_str("*").unwrap());
@@ -85,19 +92,22 @@ impl<T> SubscriptionTree<T> where T: Clone + Eq + Hash {
                     for item in next_node.items.clone() {
                         subscribers.insert(item);
                     }
-                    return
+                    return;
                 }
                 SubscriptionTree::collect_subscribers(chars, subscribers, next_node)
-            },
+            }
             // Next character not in tree, no more subscriptions on this path
-            None => return
+            None => return,
         }
-        
     }
 
-    fn get_subscribers(&self, topic: &str) -> HashSet::<T> {
+    fn get_subscribers(&self, topic: &str) -> HashSet<T> {
         let mut subscribers = HashSet::new();
-        SubscriptionTree::collect_subscribers(topic.chars().peekable(), &mut subscribers, &self.root);
+        SubscriptionTree::collect_subscribers(
+            topic.chars().peekable(),
+            &mut subscribers,
+            &self.root,
+        );
         subscribers
     }
 }

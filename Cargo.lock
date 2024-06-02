@@ -752,6 +752,7 @@ name = "rust-lab-sockets-threads"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "log",
  "prost",
  "rmp",
  "rmp-serde",

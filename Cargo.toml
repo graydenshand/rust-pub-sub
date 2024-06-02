@@ -28,6 +28,7 @@ rmp = "0.8.14"
 rmp-serde = "1.3.0"
 rmpv = { version = "1.3.0", features = ["with-serde"] }
 bytes = { version = "1.6.0", features = ["std"] }
+log = "0.4.21"
 
 [build-dependencies]
 tonic-build = "0.11"
