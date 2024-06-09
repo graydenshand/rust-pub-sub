@@ -31,7 +31,8 @@ where
     }
 }
 
-struct SubscriptionTree<T: Clone + Eq + Hash> {
+#[derive(Debug)]
+pub struct SubscriptionTree<T: Clone + Eq + Hash> {
     root: Node<T>,
 }
 impl<T> SubscriptionTree<T>
@@ -39,14 +40,14 @@ where
     T: Clone + Eq + Hash,
 {
     /// Create a new, empty tree
-    fn new() -> SubscriptionTree<T> {
+    pub fn new() -> SubscriptionTree<T> {
         SubscriptionTree {
             root: Node::new(None),
         }
     }
 
     /// Add a subscription to the tree
-    fn subscribe(&mut self, pattern: &str, id: T) {
+    pub fn subscribe(&mut self, pattern: &str, id: T) {
         let mut cursor = &mut self.root;
         let mut exists: bool;
         for c in pattern.chars() {
@@ -69,6 +70,7 @@ where
         cursor.items.push(id);
     }
 
+    /// Private, recursive function for getting all subscribers matching chars below start node
     fn collect_subscribers(
         mut chars: Peekable<Chars>,
         subscribers: &mut HashSet<T>,
@@ -101,7 +103,8 @@ where
         }
     }
 
-    fn get_subscribers(&self, topic: &str) -> HashSet<T> {
+    /// Return the full set of subscribers to a given topic
+    pub fn get_subscribers(&self, topic: &str) -> HashSet<T> {
         let mut subscribers = HashSet::new();
         SubscriptionTree::collect_subscribers(
             topic.chars().peekable(),

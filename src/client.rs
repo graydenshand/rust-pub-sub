@@ -9,10 +9,11 @@ use std::time::Duration;
 use std::{thread, time};
 mod datagram;
 use datagram::Message;
+use std::io::BufWriter;
 
 fn main() -> std::io::Result<()> {
     let mut i = 0;
-    let mut stream = TcpStream::connect("127.0.0.1:1996")?;
+    let mut stream = BufWriter::new(TcpStream::connect("127.0.0.1:1996")?);
     loop {
         let val = Value::from(i);
         // println!("{:?}", val);
@@ -20,7 +21,7 @@ fn main() -> std::io::Result<()> {
         let message = Message::new("test", val);
         let mut buf = Vec::new();
         message.serialize(&mut Serializer::new(&mut buf)).unwrap();
-        stream.write_all(&mut buf)?;
+        stream.write(&mut buf)?;
         i += 1;
     }
 }

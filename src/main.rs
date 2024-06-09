@@ -1,4 +1,5 @@
 use std::borrow::BorrowMut;
+use std::ops::Not;
 // use std::net::{TcpListener, TcpStream};
 use rmp_serde;
 use rmp_serde::{Deserializer, Serializer};
@@ -15,6 +16,10 @@ use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::stream;
 use tokio::time::timeout;
+use tokio::fs::File;
+use futures::future::{join_all, join};
+use std::collections::HashMap;
+use clap::Parser;
 
 mod datagram;
 mod subscription_tree;
@@ -116,29 +121,150 @@ impl MessageWriter {
     pub async fn send(&mut self, message: Message) -> Result<(), Box<dyn Error>> {
         let mut buf = Vec::new();
         message.serialize(&mut Serializer::new(&mut buf)).unwrap();
-        self.writer.write_all(&mut buf).await?;
+        self.writer.write(&mut buf).await?;
         Ok(())
     }
+
+    pub async fn write_loop(&mut self) -> Result<(), Box<dyn Error>> {
+        loop {
+            println!("publishing...");
+            self.send(Message::new("test", Value::Boolean(true))).await?;
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Subscription {
+    addr: String,
+    pattern: String
+}
+
+/// An async message passing application
+#[derive(Debug)]
+pub struct GSub {
+    /// Port on which to listen for new requests
+    port: u16,
+    /// Structure containing information about clients subscribed to topics on this GSub
+    subscribers: subscription_tree::SubscriptionTree<u8>,
+
+    /// List of this GSub's subscriptions to topics on other GSubs
+    subscriptions: Vec<Subscription>
+}
+impl GSub {
+    pub async fn new(port: u16, subscription_file: &str) -> Result<GSub, Box<dyn Error>> {
+        Ok(GSub {
+            port,
+            subscribers: subscription_tree::SubscriptionTree::new(),
+            subscriptions: GSub::parse_subscription_config(subscription_file).await?
+        })
+    }
+
+    /// Parse subscriptions.cfg file containing list of incoming subscriptions
+    async fn parse_subscription_config(subscription_file: &str) -> Result<Vec<Subscription>, Box<dyn Error>> {
+        let mut file = File::open(subscription_file).await?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).await?;
+        let mut subscriptions = vec![];
+        contents
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("#") && *l != "")
+            .for_each(|l| {
+                let mut splits = l.split_whitespace();
+                let addr = String::from(splits.next().unwrap());
+                let pattern = splits.collect::<String>();
+                subscriptions.push(Subscription{addr, pattern});
+            });
+        Ok(subscriptions)
+    }
+
+    pub async fn server(&self) -> Result<(), Box<dyn Error>> {
+        let listener = TcpListener::bind(format!("0.0.0.0:{}", self.port)).await?;
+
+        loop {
+            let (stream, _) = listener.accept().await?;
+            println!("Connection made");
+            let (r, w) = stream.into_split();
+            let mut reader = MessageReader::new(r);
+            tokio::spawn(async move {
+                _ = reader.receive_loop().await;
+            });
+
+            let mut writer = MessageWriter::new(w);
+            tokio::spawn(async move {
+                _ = writer
+                    .send(Message::new("test", Value::Boolean(true)))
+                    .await;
+            });
+        }
+    }
+    
+    /// Loop forever, attempting to maintain connection with server
+    async fn connect(addr: &str) -> () {
+        loop {
+            let resp = TcpStream::connect(addr).await;
+            match resp {
+                Ok(stream) => {
+                    println!("Connected: {}", addr);
+                    let (r, w) = stream.into_split();
+                    let mut reader = MessageReader::new(r);
+                    let read_future = tokio::spawn(async move {
+                        _ = reader.receive_loop().await.unwrap();
+                    });
+
+                    let mut writer = MessageWriter::new(w);
+                    let write_future = tokio::spawn(async move {
+                        _ = writer
+                            .write_loop()
+                            .await.unwrap();
+                    });
+                    let (r, w) = tokio::join!(read_future, write_future);
+                    if r.is_err() { continue };
+                    if w.is_err() { continue };
+                }
+                Err(e) => {
+                    println!("{:?}", e);
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue
+                }
+            }
+        }
+    }
+
+    /// Manage client connections
+    pub async fn client(&self) -> () {
+        let mut futures = vec![];
+        self.subscriptions.iter().cloned().for_each(|sub| {
+            futures.push(tokio::spawn(async move {
+                GSub::connect(&sub.addr).await
+            }));
+        });
+        join_all(futures).await;
+    }
+}
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Port to listen on
+    #[arg(short, long)]
+    port: u16,
+
+    /// Path to subscriptions file
+    #[arg(short, long)]
+    subscriptions: String
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let listener = TcpListener::bind("127.0.0.1:1996").await?;
+    let args = Args::parse();
+    let gsub = GSub::new(args.port, &args.subscriptions).await?;
+    // Spawn server task to listen for incoming connections
+    let server_future = gsub.server();
 
-    loop {
-        let (stream, _) = listener.accept().await?;
-        println!("Connection made");
-        let (r, w) = stream.into_split();
-        let mut reader = MessageReader::new(r);
-        tokio::spawn(async move {
-            _ = reader.receive_loop().await;
-        });
-
-        let mut writer = MessageWriter::new(w);
-        tokio::spawn(async move {
-            _ = writer
-                .send(Message::new("test", Value::Boolean(true)))
-                .await;
-        });
-    }
+    // Spawn client task to make outgoing connections
+    let client_future = gsub.client();
+    let (server_result, _) = join(server_future, client_future).await;
+    server_result.unwrap();
+    Ok(())
 }
