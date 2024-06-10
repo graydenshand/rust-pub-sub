@@ -14,6 +14,16 @@ impl Message {
             value,
         }
     }
+
+    /// Get the topic
+    pub fn topic(&self) -> &str {
+        &self.topic
+    }
+
+    /// Get the value
+    pub fn value(&self) -> &Value {
+        &self.value
+    }
 }
 
 #[cfg(test)]
