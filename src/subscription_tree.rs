@@ -5,8 +5,10 @@ use std::hash::Hash;
 use std::iter::Peekable;
 use std::str::Chars;
 use std::str::FromStr;
+use std::error::Error;
 
-#[derive(Debug)]
+
+#[derive(Debug, Clone)]
 struct Node<T: Clone + Eq + Hash> {
     token: Option<char>,
     children: HashMap<char, Node<T>>,
@@ -33,7 +35,10 @@ where
 
 #[derive(Debug)]
 pub struct SubscriptionTree<T: Clone + Eq + Hash> {
+    /// The root node in the subscription tree
     root: Node<T>,
+    /// Maping of client to a set of its subscription patterns
+    subscribers: HashMap<T, HashSet<String>>
 }
 impl<T> SubscriptionTree<T>
 where
@@ -43,11 +48,20 @@ where
     pub fn new() -> SubscriptionTree<T> {
         SubscriptionTree {
             root: Node::new(None),
+            subscribers: HashMap::new(),
         }
     }
 
     /// Add a subscription to the tree
     pub fn subscribe(&mut self, pattern: &str, id: T) {
+        // Add pattern to subscriber's map
+        if let Some(existing_subscribers) = self.subscribers.get_mut(&id) {
+            existing_subscribers.insert(pattern.to_string());
+        } else {
+            self.subscribers.insert(id.clone(), HashSet::from([pattern.to_string()]));
+        }
+
+        // Add client to pattern tree
         let mut cursor = &mut self.root;
         let mut exists: bool;
         for c in pattern.chars() {
@@ -68,6 +82,7 @@ where
             }
         }
         cursor.items.push(id);
+        
     }
 
     /// Private, recursive function for getting all subscribers matching chars below start node
@@ -113,7 +128,48 @@ where
         );
         subscribers
     }
+
+    /// Delete a subscription
+    fn unsubscribe(&mut self, id: T, pattern: &str) -> Result<(), &str> {
+        if let Some(patterns) = self.subscribers.get_mut(&id) {
+            // Delete pattern from subscribers map
+            patterns.remove(pattern);
+
+            // Delete subscription from Tree
+            // Traverse the tree to find leaf node
+            let mut cursor = &mut self.root;
+            let mut path = vec![];
+            for c in pattern.chars() {
+                if let Some(node) = cursor.children.get_mut(&c) {
+                    cursor = node;
+                } else {
+                    return Err("Not found");
+                }
+                path.push(cursor.clone());
+            }
+            // Terminal node found for this subscription, delete item from node 
+            let idx = cursor.items.iter().position(|i| i == &id).unwrap();
+            cursor.items.remove(idx);
+
+            // Walk back up the path, deleting any empty nodes (no items or children)
+            while path.len() > 1 {
+                let node = path.pop().unwrap();
+                if node.items.is_empty() && node.children.is_empty() {
+                    let parent = path.last_mut().unwrap();
+                    parent.children.remove(&node.token.unwrap());
+                } else {
+                    break
+                }
+            }
+
+            Ok(())
+        } else {
+            Err("Not found")
+        }
+        
+    }
 }
+
 
 #[cfg(test)]
 mod tests {

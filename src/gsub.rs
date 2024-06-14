@@ -12,15 +12,17 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::fs::File;
 use futures::future::{join_all, join};
 use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 
 use crate::datagram::Message;
-use crate::subscription_tree;
+use crate::subscription_tree::{self, SubscriptionTree};
 use bytes::{Buf, BytesMut};
 
 pub struct MessageReader {
     reader: OwnedReadHalf,
     buffer: BytesMut,
+    subscribers: Arc<Mutex<SubscriptionTree<String>>>
 }
 
 const SYSTEM_TOPIC_PREFIX: &'static str = "!system";
@@ -28,10 +30,11 @@ const SUBSCRIBE_TOPIC: &'static str = "/subscribe";
 // const SUBSCRIBE_TOPIC: String = String::from("!system/subscribe");
 
 impl MessageReader {
-    pub fn new(stream: OwnedReadHalf) -> MessageReader {
+    pub fn new(stream: OwnedReadHalf, subscribers: Arc<Mutex<SubscriptionTree<String>>>) -> MessageReader {
         MessageReader {
             reader: stream,
             buffer: BytesMut::with_capacity(4096),
+            subscribers: subscribers
         }
     }
 
@@ -65,7 +68,13 @@ impl MessageReader {
                         SUBSCRIBE_TOPIC => {
                             // Message value contains subscription pattern
                             println!("New subscription request: {:?}", (self.reader.peer_addr().unwrap(), &m.value().as_str().unwrap()));
-                            // subscription_tree.insert(message.value(), <channel_tx>)
+                            // Wait for ownership of mutex lock
+                            let mut subscribers = self.subscribers.lock().unwrap();
+
+                            // Add new subscription entry to the subscriber tree
+                            subscribers.subscribe(&m.value().as_str().unwrap(), self.reader.peer_addr().unwrap().to_string());
+
+                            
                         },
                         _ => ()
                     }
@@ -158,7 +167,7 @@ pub struct GSub {
     /// Port on which to listen for new requests
     port: u16,
     /// Structure containing information about clients subscribed to topics on this GSub
-    subscribers: subscription_tree::SubscriptionTree<u8>,
+    subscribers: Arc<Mutex<subscription_tree::SubscriptionTree<String>>>,
 
     /// List of this GSub's subscriptions to topics on other GSubs
     subscriptions: Vec<Subscription>
@@ -167,7 +176,7 @@ impl GSub {
     pub async fn new(port: u16, subscription_file: &str) -> Result<GSub, Box<dyn Error>> {
         Ok(GSub {
             port,
-            subscribers: subscription_tree::SubscriptionTree::new(),
+            subscribers: Arc::new(Mutex::new(subscription_tree::SubscriptionTree::new())),
             subscriptions: GSub::parse_subscription_config(subscription_file).await?
         })
     }
@@ -210,7 +219,7 @@ impl GSub {
             let (stream, _) = listener.accept().await?;
             println!("Connection made");
             let (r, w) = stream.into_split();
-            let mut reader = MessageReader::new(r);
+            let mut reader = MessageReader::new(r, self.subscribers.clone());
             tokio::spawn(async move {
                 _ = reader.receive_loop().await;
             });
@@ -225,16 +234,15 @@ impl GSub {
     }
     
     /// Loop forever receiving messages from a specific host, attempting to maintain connection with server
-    async fn receive(addr: &str, subscriptions: Vec<String>) -> () {
+    async fn receive(&self, addr: String, subscriptions: Vec<String>) -> () {
         loop {
-            let resp = TcpStream::connect(addr).await;
+            let resp = TcpStream::connect(&addr).await;
             match resp {
                 Ok(stream) => {
                     println!("Connected: {}", addr);
 
-
                     let (r, w) = stream.into_split();
-                    let mut reader = MessageReader::new(r);
+                    let mut reader = MessageReader::new(r, self.subscribers.clone());
                     let read_future = tokio::spawn(async move {
                         _ = reader.receive_loop().await.unwrap();
                     });
@@ -278,15 +286,17 @@ impl GSub {
                 .filter(|s| s.addr == *addr)
                 .map(|s| s.pattern.clone())
             );
-            futures.push(tokio::spawn(async move {  
-                GSub::receive(&addr, subscriptions).await
-            }));
+            let future = self.receive(addr.clone(), subscriptions);
+            futures.push(future);
         });
         join_all(futures).await;
     }
 
     /// High level entrypoint
     pub async fn run(&self) {
+        // Guarded and reference counted reference to subscriber tree
+        // let subscribers = Arc::new(Mutex::new(&self.subscribers));
+
         // Spawn server task to listen for incoming connections
         let server_future = self.server();
 
