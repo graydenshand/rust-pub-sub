@@ -130,10 +130,13 @@ where
     }
 
     /// Delete a subscription
-    fn unsubscribe(&mut self, id: T, pattern: &str) -> Result<(), &str> {
+    fn unsubscribe(&mut self, id: &T, pattern: &str) -> Result<(), &str> {
         if let Some(patterns) = self.subscribers.get_mut(&id) {
             // Delete pattern from subscribers map
             patterns.remove(pattern);
+            if patterns.is_empty() {
+                self.subscribers.remove(&id);
+            }
 
             // Delete subscription from Tree
             // Traverse the tree to find leaf node
@@ -148,7 +151,7 @@ where
                 path.push(cursor.clone());
             }
             // Terminal node found for this subscription, delete item from node 
-            let idx = cursor.items.iter().position(|i| i == &id).unwrap();
+            let idx = cursor.items.iter().position(|i| i == id).unwrap();
             cursor.items.remove(idx);
 
             // Walk back up the path, deleting any empty nodes (no items or children)
@@ -166,7 +169,20 @@ where
         } else {
             Err("Not found")
         }
-        
+    }
+
+    fn unsubscribe_client(&mut self, id: T) -> Result<(), &str>  {
+        match self.subscribers.get(&id) {
+            Some(client_subscriptions) => {
+                let patterns = client_subscriptions.clone();
+                for pattern in patterns {
+                    self.unsubscribe(&id, &pattern).ok().expect("Unsubscribe was successful");    
+                }
+                self.subscribers.remove(&id);
+                Ok(())
+            },
+            None => Err("Not found")
+        }
     }
 }
 
@@ -185,5 +201,11 @@ mod tests {
         st.root.children.get(&key).expect("exists");
         assert!(st.get_subscribers("test") == HashSet::from([&1]));
         assert!(st.get_subscribers("metrics") == HashSet::from([&0, &1]));
+
+        st.unsubscribe(&&0, "metrics").unwrap();
+        assert!(st.get_subscribers("metrics") == HashSet::from([&1]));
+
+        st.unsubscribe_client(&1).unwrap();
+        assert!(st.get_subscribers("metrics") == HashSet::new());
     }
 }
