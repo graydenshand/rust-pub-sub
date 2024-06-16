@@ -1,12 +1,12 @@
-use rmp_serde::to_vec;
-use rmp_serde::{Deserializer, Serializer};
-use rmpv::{decode, encode, Value};
+
+use rmp_serde::{Serializer};
+use rmpv::{Value};
 use serde::Serialize;
-use std::io::Read;
+
 use std::io::Write;
 use std::net::TcpStream;
-use std::time::Duration;
-use std::{thread, time};
+
+
 mod datagram;
 use datagram::Message;
 use std::io::BufWriter;

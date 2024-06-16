@@ -1,4 +1,4 @@
-use rmp_serde;
+
 use rmpv::Value;
 use serde::{Deserialize, Serialize};
 
@@ -28,7 +28,7 @@ impl Message {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
 
     #[test]
     fn test_serde() {}

@@ -5,7 +5,7 @@ use rmpv::Value;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::error::Error;
-use std::hash::Hash;
+
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio;
