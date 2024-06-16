@@ -1,11 +1,11 @@
+use clap::Parser;
+use futures::future::join;
 use std::error::Error;
 use tokio;
-use futures::future::join;
-use clap::Parser;
 
 mod datagram;
-mod subscription_tree;
 mod gsub;
+mod subscription_tree;
 use gsub::GSub;
 
 #[derive(Parser, Debug)]
@@ -17,14 +17,14 @@ struct Args {
 
     /// Path to subscriptions file
     #[arg(short, long)]
-    subscriptions: String
+    subscriptions: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     let gsub = GSub::new(args.port, &args.subscriptions).await?;
-    
+
     gsub.run().await;
     Ok(())
 }

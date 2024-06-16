@@ -1,19 +1,18 @@
+use futures::future::{join, join_all};
 use rmp_serde;
 use rmp_serde::Serializer;
 use rmpv::Value;
+use serde::Serialize;
+use std::collections::HashSet;
 use std::error::Error;
 use std::hash::Hash;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio;
-use tokio::io::{AsyncReadExt,AsyncWriteExt};
-use serde::Serialize;
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::fs::File;
-use futures::future::{join_all, join};
-use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
-
 
 use crate::datagram::Message;
 use crate::subscription_tree::{self, SubscriptionTree};
@@ -22,7 +21,7 @@ use bytes::{Buf, BytesMut};
 pub struct MessageReader {
     reader: OwnedReadHalf,
     buffer: BytesMut,
-    subscribers: Arc<Mutex<SubscriptionTree<String>>>
+    subscribers: Arc<Mutex<SubscriptionTree<String>>>,
 }
 
 const SYSTEM_TOPIC_PREFIX: &'static str = "!system";
@@ -30,16 +29,21 @@ const SUBSCRIBE_TOPIC: &'static str = "/subscribe";
 // const SUBSCRIBE_TOPIC: String = String::from("!system/subscribe");
 
 impl MessageReader {
-    pub fn new(stream: OwnedReadHalf, subscribers: Arc<Mutex<SubscriptionTree<String>>>) -> MessageReader {
+    pub fn new(
+        stream: OwnedReadHalf,
+        subscribers: Arc<Mutex<SubscriptionTree<String>>>,
+    ) -> MessageReader {
         MessageReader {
             reader: stream,
             buffer: BytesMut::with_capacity(4096),
-            subscribers: subscribers
+            subscribers: subscribers,
         }
     }
 
     async fn receive_loop(&mut self) -> Result<(), Box<dyn Error>> {
         let start = Instant::now();
+
+        let client_id = self.reader.peer_addr().unwrap();
 
         let mut count = 0;
 
@@ -55,11 +59,13 @@ impl MessageReader {
                     (count as f64 / seconds).round()
                 );
                 println!("Disconnected");
+                let mut subscribers = self.subscribers.lock().unwrap();
+                let _ = subscribers.unsubscribe_client(client_id.to_string());
                 return Ok(());
             } else {
                 // Do something with the message
                 // println!("{:?}", message?.unwrap());
-                let m : Message = message?.expect("Already checked this is not none");
+                let m: Message = message?.expect("Already checked this is not none");
                 // println!("{:?}", m);
                 if m.topic().starts_with(SYSTEM_TOPIC_PREFIX) {
                     // TODO: spawn new task
@@ -67,16 +73,21 @@ impl MessageReader {
                     match m.topic().trim_start_matches(SYSTEM_TOPIC_PREFIX) {
                         SUBSCRIBE_TOPIC => {
                             // Message value contains subscription pattern
-                            println!("New subscription request: {:?}", (self.reader.peer_addr().unwrap(), &m.value().as_str().unwrap()));
+                            println!(
+                                "New subscription request: {:?}",
+                                (
+                                    self.reader.peer_addr().unwrap(),
+                                    &m.value().as_str().unwrap()
+                                )
+                            );
                             // Wait for ownership of mutex lock
                             let mut subscribers = self.subscribers.lock().unwrap();
 
                             // Add new subscription entry to the subscriber tree
-                            subscribers.subscribe(&m.value().as_str().unwrap(), self.reader.peer_addr().unwrap().to_string());
-
-                            
-                        },
-                        _ => ()
+                            subscribers
+                                .subscribe(&m.value().as_str().unwrap(), client_id.to_string());
+                        }
+                        _ => (),
                     }
                 };
 
@@ -149,7 +160,8 @@ impl MessageWriter {
     pub async fn write_loop(&mut self) -> Result<(), Box<dyn Error>> {
         loop {
             println!("publishing...");
-            self.send(Message::new("test", Value::Boolean(true))).await?;
+            self.send(Message::new("test", Value::Boolean(true)))
+                .await?;
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
@@ -158,7 +170,7 @@ impl MessageWriter {
 #[derive(Debug, Clone)]
 struct Subscription {
     addr: String,
-    pattern: String
+    pattern: String,
 }
 
 /// An async message passing application
@@ -170,22 +182,22 @@ pub struct GSub {
     subscribers: Arc<Mutex<subscription_tree::SubscriptionTree<String>>>,
 
     /// List of this GSub's subscriptions to topics on other GSubs
-    subscriptions: Vec<Subscription>
+    subscriptions: Vec<Subscription>,
 }
 impl GSub {
     pub async fn new(port: u16, subscription_file: &str) -> Result<GSub, Box<dyn Error>> {
         Ok(GSub {
             port,
             subscribers: Arc::new(Mutex::new(subscription_tree::SubscriptionTree::new())),
-            subscriptions: GSub::parse_subscription_config(subscription_file).await?
+            subscriptions: GSub::parse_subscription_config(subscription_file).await?,
         })
     }
 
     /// Parse subscriptions.cfg file containing list of incoming subscriptions
-    /// 
+    ///
     /// Args:
     ///     subscription_file: path to subscription.cfg file
-    /// 
+    ///
     /// Example subscription.cfg
     /// ```
     /// # Subscribe to all topics on local server
@@ -193,7 +205,9 @@ impl GSub {
     /// # Subscribe to a specific topic on a remote server
     /// example.com:2468 US/VT/Weather/Daily
     /// ```
-    async fn parse_subscription_config(subscription_file: &str) -> Result<Vec<Subscription>, Box<dyn Error>> {
+    async fn parse_subscription_config(
+        subscription_file: &str,
+    ) -> Result<Vec<Subscription>, Box<dyn Error>> {
         let mut file = File::open(subscription_file).await?;
         let mut contents = String::new();
         file.read_to_string(&mut contents).await?;
@@ -205,13 +219,13 @@ impl GSub {
                 let mut splits = l.split_whitespace();
                 let addr = String::from(splits.next().unwrap());
                 let pattern = splits.collect::<String>();
-                subscriptions.push(Subscription{addr, pattern});
+                subscriptions.push(Subscription { addr, pattern });
             });
         Ok(subscriptions)
     }
 
     /// Listen for incoming connections
-    /// 
+    ///
     pub async fn server(&self) -> Result<(), Box<dyn Error>> {
         let listener = TcpListener::bind(format!("0.0.0.0:{}", self.port)).await?;
 
@@ -232,7 +246,7 @@ impl GSub {
             });
         }
     }
-    
+
     /// Loop forever receiving messages from a specific host, attempting to maintain connection with server
     async fn receive(&self, addr: String, subscriptions: Vec<String>) -> () {
         loop {
@@ -252,22 +266,27 @@ impl GSub {
                     for s in subs {
                         // println!("Subscribe: {}", s);
                         let topic = format!("{}{}", SYSTEM_TOPIC_PREFIX, SUBSCRIBE_TOPIC);
-                        writer.send(Message::new(&topic, Value::from(s))).await.expect("Subscription was sent");
+                        writer
+                            .send(Message::new(&topic, Value::from(s)))
+                            .await
+                            .expect("Subscription was sent");
                     }
 
                     let write_future = tokio::spawn(async move {
-                        _ = writer
-                            .write_loop()
-                            .await.unwrap();
+                        _ = writer.write_loop().await.unwrap();
                     });
                     let (r, w) = tokio::join!(read_future, write_future);
-                    if r.is_err() { continue };
-                    if w.is_err() { continue };
+                    if r.is_err() {
+                        continue;
+                    };
+                    if w.is_err() {
+                        continue;
+                    };
                 }
                 Err(e) => {
                     println!("{:?}", e);
                     tokio::time::sleep(Duration::from_secs(1)).await;
-                    continue
+                    continue;
                 }
             }
         }
@@ -277,14 +296,16 @@ impl GSub {
     pub async fn client(&self) {
         // Not efficient for large number of subscriptions
         let mut futures = vec![];
-        let unique_hosts= HashSet::<String>::from_iter(self.subscriptions.iter().map(|s| s.addr.clone()));
+        let unique_hosts =
+            HashSet::<String>::from_iter(self.subscriptions.iter().map(|s| s.addr.clone()));
 
         // unique_hosts.
         unique_hosts.into_iter().for_each(|addr| {
             let subscriptions = Vec::from_iter(
-                self.subscriptions.iter()
-                .filter(|s| s.addr == *addr)
-                .map(|s| s.pattern.clone())
+                self.subscriptions
+                    .iter()
+                    .filter(|s| s.addr == *addr)
+                    .map(|s| s.pattern.clone()),
             );
             let future = self.receive(addr.clone(), subscriptions);
             futures.push(future);
