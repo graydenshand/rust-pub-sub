@@ -1,8 +1,4 @@
-
-
-
 use rmpv::Value;
-
 
 use std::error::Error;
 
@@ -13,7 +9,9 @@ use tokio;
 use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::TcpListener;
 
-use crate::datagram::{Message, MessageWriter, MessageReader, SYSTEM_TOPIC_PREFIX, SUBSCRIBE_TOPIC};
+use crate::datagram::{
+    Message, MessageReader, MessageWriter, SUBSCRIBE_TOPIC, SYSTEM_TOPIC_PREFIX,
+};
 use crate::subscription_tree::{self};
 
 #[derive(Debug, Clone)]
@@ -54,23 +52,18 @@ impl Server {
                     // Message value contains subscription pattern
                     println!(
                         "New subscription request: {:?}",
-                        (
-                            client_id.to_string(),
-                            &m.value().as_str().unwrap()
-                        )
+                        (client_id.to_string(), &m.value().as_str().unwrap())
                     );
                     // Wait for ownership of mutex lock
                     let mut subscribers = self.subscribers.lock().unwrap();
 
                     // Add new subscription entry to the subscriber tree
-                    subscribers
-                        .subscribe(&m.value().as_str().unwrap(), client_id.to_string());
+                    subscribers.subscribe(&m.value().as_str().unwrap(), client_id.to_string());
                 }
                 _ => (),
             }
         };
     }
-        
 
     /// Listen for incoming connections
     ///
@@ -94,5 +87,4 @@ impl Server {
             });
         }
     }
-
 }

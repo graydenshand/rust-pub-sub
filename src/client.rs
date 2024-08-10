@@ -1,8 +1,8 @@
-
 use tokio::net::TcpStream;
 
-
-use crate::datagram::{Message, MessageReader, MessageWriter, SYSTEM_TOPIC_PREFIX, SUBSCRIBE_TOPIC};
+use crate::datagram::{
+    Message, MessageReader, MessageWriter, SUBSCRIBE_TOPIC, SYSTEM_TOPIC_PREFIX,
+};
 
 use futures::future::join_all;
 use rmpv::Value;
@@ -13,7 +13,6 @@ use std::time::Duration;
 use tokio;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
-
 
 #[derive(Debug, Clone)]
 struct Subscription {

@@ -2,15 +2,14 @@ use rmp_serde::Serializer;
 use rmpv::Value;
 use serde::{Deserialize, Serialize};
 
-
 use rmp_serde;
 use std::error::Error;
 
+use bytes::{Buf, BytesMut};
 use std::time::Instant;
 use tokio;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use bytes::{Buf, BytesMut};
 
 pub const SYSTEM_TOPIC_PREFIX: &'static str = "!system";
 pub const SUBSCRIBE_TOPIC: &'static str = "/subscribe";
@@ -45,9 +44,7 @@ pub struct MessageReader {
 }
 
 impl MessageReader {
-    pub fn new(
-        stream: OwnedReadHalf,
-    ) -> MessageReader {
+    pub fn new(stream: OwnedReadHalf) -> MessageReader {
         MessageReader {
             reader: stream,
             buffer: BytesMut::with_capacity(4096),
@@ -76,8 +73,8 @@ impl MessageReader {
                 // Do something with the message
                 // println!("{:?}", message?.unwrap());
                 let _m: Message = message?.expect("Already checked this is not none");
-                
-                // TODO: Invoke callback 
+
+                // TODO: Invoke callback
             }
 
             count += 1;
@@ -142,17 +139,18 @@ impl MessageWriter {
         Ok(())
     }
 
-    pub async fn write_loop(&mut self, ) {
+    pub async fn write_loop(&mut self) {
         loop {
             // TODO replace with channel listener
-            self.send(Message::new("test", Value::Boolean(true))).await.unwrap();
+            self.send(Message::new("test", Value::Boolean(true)))
+                .await
+                .unwrap();
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    
 
     #[test]
     fn test_serde() {}
