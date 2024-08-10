@@ -3,10 +3,11 @@ use clap::Parser;
 use std::error::Error;
 use tokio;
 
+mod client;
 mod datagram;
-mod gsub;
+mod server;
 mod subscription_tree;
-use gsub::GSub;
+use server::Server;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -23,8 +24,8 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
-    let gsub = GSub::new(args.port, &args.subscriptions).await?;
+    let Server = Server::new(args.port).await?;
 
-    gsub.run().await;
+    Server.run().await;
     Ok(())
 }
