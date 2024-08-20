@@ -15,17 +15,13 @@ struct Args {
     /// Port to listen on
     #[arg(short, long)]
     port: u16,
-
-    /// Path to subscriptions file
-    #[arg(short, long)]
-    subscriptions: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
-    let Server = Server::new(args.port).await?;
+    let server = Server::new(args.port).await?;
 
-    Server.run().await;
+    server.run().await?;
     Ok(())
 }

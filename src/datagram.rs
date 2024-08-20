@@ -41,14 +41,21 @@ impl Message {
 pub struct MessageReader {
     reader: OwnedReadHalf,
     buffer: BytesMut,
+    client_id: String
 }
 
 impl MessageReader {
     pub fn new(stream: OwnedReadHalf) -> MessageReader {
+        let client_id = stream.peer_addr().expect("Read stream has a peer address").to_string();
         MessageReader {
             reader: stream,
             buffer: BytesMut::with_capacity(4096),
+            client_id,
         }
+    }
+
+    pub fn client_id(&self) -> &str {
+        return &self.client_id
     }
 
     pub async fn receive_loop(&mut self) -> Result<(), Box<dyn Error>> {

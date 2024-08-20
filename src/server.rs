@@ -1,7 +1,7 @@
 use rmpv::Value;
 
 use std::error::Error;
-
+use std::time::Instant;
 use std::sync::{Arc, Mutex};
 
 use tokio;
@@ -36,17 +36,9 @@ impl Server {
         })
     }
 
-    async fn on_disconnect(&mut self, client_id: String) {
-        let mut subscribers = self.subscribers.lock().unwrap();
-        let _ = subscribers.unsubscribe_client(client_id);
-    }
-
-    async fn on_receive(&self, reader: &OwnedReadHalf, m: Message) {
-        // println!("{:?}", m);
+    /// Process a message published by a client
+    async fn on_receive(subscribers: Arc<Mutex<subscription_tree::SubscriptionTree<String>>>, client_id: String, m: Message) {
         if m.topic().starts_with(SYSTEM_TOPIC_PREFIX) {
-            // TODO: spawn new task
-            // drop the prefix
-            let client_id = reader.peer_addr().unwrap().to_string();
             match m.topic().trim_start_matches(SYSTEM_TOPIC_PREFIX) {
                 SUBSCRIBE_TOPIC => {
                     // Message value contains subscription pattern
@@ -55,18 +47,55 @@ impl Server {
                         (client_id.to_string(), &m.value().as_str().unwrap())
                     );
                     // Wait for ownership of mutex lock
-                    let mut subscribers = self.subscribers.lock().unwrap();
+                    let mut subscribers = subscribers.lock().unwrap();
 
                     // Add new subscription entry to the subscriber tree
-                    subscribers.subscribe(&m.value().as_str().unwrap(), client_id.to_string());
+                    subscribers.subscribe(&m.value().as_str().unwrap(), client_id);
                 }
                 _ => (),
             }
         };
     }
 
+    /// Maintain connection with a client and handle published messages
+    pub async fn receive_loop(&mut self, stream: OwnedReadHalf) -> Result<(), Box<dyn Error>> {
+        let mut reader = MessageReader::new(stream);
+        let start = Instant::now();
+
+        let mut count = 0;
+
+        loop {
+            let message = reader.read_value().await;
+            if message.is_err() || message.as_ref().unwrap().is_none() {
+                // Unsubscribe client from all topics
+                let mut subscribers = self.subscribers.lock().unwrap();
+                let _ = subscribers.unsubscribe_client(reader.client_id().to_string());
+
+                // Log stats about messages received from client
+                let end = Instant::now();
+                let seconds = (end - start).as_millis() as f64 / 1000.0;
+                println!(
+                    "{} messages received in {}s - {} m/s",
+                    count,
+                    seconds,
+                    (count as f64 / seconds).round()
+                );
+                println!("Disconnected");
+                // Terminate loop
+                return Ok(());
+            } else {
+                // println!("{:?}", message?.unwrap());
+                let m: Message = message.expect("message is Ok").expect("message is not None");
+
+                // Process received message in subtask
+                tokio::spawn(Server::on_receive(Arc::clone(&self.subscribers), reader.client_id().to_string(), m));
+            }
+
+            count += 1;
+        }
+    }
+
     /// Listen for incoming connections
-    ///
     pub async fn run(&self) -> Result<(), Box<dyn Error>> {
         let listener = TcpListener::bind(format!("0.0.0.0:{}", self.port)).await?;
 
