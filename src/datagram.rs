@@ -58,36 +58,6 @@ impl MessageReader {
         return &self.client_id
     }
 
-    pub async fn receive_loop(&mut self) -> Result<(), Box<dyn Error>> {
-        let start = Instant::now();
-
-        let mut count = 0;
-
-        loop {
-            let message = self.read_value().await;
-            if message.is_err() || message.as_ref().unwrap().is_none() {
-                let end = Instant::now();
-                let seconds = (end - start).as_millis() as f64 / 1000.0;
-                println!(
-                    "{} messages received in {}s - {} m/s",
-                    count,
-                    seconds,
-                    (count as f64 / seconds).round()
-                );
-                println!("Disconnected");
-                return Ok(());
-            } else {
-                // Do something with the message
-                // println!("{:?}", message?.unwrap());
-                let _m: Message = message?.expect("Already checked this is not none");
-
-                // TODO: Invoke callback
-            }
-
-            count += 1;
-        }
-    }
-
     fn parse_value(&mut self) -> (Option<Message>, usize) {
         let buf = &mut &self.buffer[..];
         let start_len = buf.len();

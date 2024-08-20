@@ -58,7 +58,7 @@ impl Server {
     }
 
     /// Maintain connection with a client and handle published messages
-    pub async fn receive_loop(&mut self, stream: OwnedReadHalf) -> Result<(), Box<dyn Error>> {
+    pub async fn receive_loop(subscribers: Arc<Mutex<subscription_tree::SubscriptionTree<String>>>, stream: OwnedReadHalf) -> Result<(), Box<dyn Error>> {
         let mut reader = MessageReader::new(stream);
         let start = Instant::now();
 
@@ -68,8 +68,7 @@ impl Server {
             let message = reader.read_value().await;
             if message.is_err() || message.as_ref().unwrap().is_none() {
                 // Unsubscribe client from all topics
-                let mut subscribers = self.subscribers.lock().unwrap();
-                let _ = subscribers.unsubscribe_client(reader.client_id().to_string());
+                let _ = subscribers.lock().unwrap().unsubscribe_client(reader.client_id().to_string());
 
                 // Log stats about messages received from client
                 let end = Instant::now();
@@ -88,7 +87,7 @@ impl Server {
                 let m: Message = message.expect("message is Ok").expect("message is not None");
 
                 // Process received message in subtask
-                tokio::spawn(Server::on_receive(Arc::clone(&self.subscribers), reader.client_id().to_string(), m));
+                tokio::spawn(Server::on_receive(Arc::clone(&subscribers), reader.client_id().to_string(), m));
             }
 
             count += 1;
@@ -103,9 +102,9 @@ impl Server {
             let (stream, _) = listener.accept().await?;
             println!("Connection made");
             let (r, w) = stream.into_split();
-            let mut reader = MessageReader::new(r);
+            let subscribers = Arc::clone(&self.subscribers);
             tokio::spawn(async move {
-                _ = reader.receive_loop().await;
+                _ = Server::receive_loop(subscribers, r).await;
             });
 
             let mut writer = MessageWriter::new(w);
