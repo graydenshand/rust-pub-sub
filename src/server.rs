@@ -1,7 +1,9 @@
 use rmpv::Value;
 
+use std::alloc::System;
 use std::error::Error;
-use std::time::Instant;
+use std::time::{Instant};
+use chrono::DateTime;
 use std::sync::{Arc, Mutex};
 
 use tokio;
@@ -37,7 +39,9 @@ impl Server {
     }
 
     /// Process a message published by a client
-    async fn on_receive(subscribers: Arc<Mutex<subscription_tree::SubscriptionTree<String>>>, client_id: String, m: Message) {
+    fn on_receive(subscribers: Arc<Mutex<subscription_tree::SubscriptionTree<String>>>, client_id: String, m: Message) {
+        println!("{:?} Message received - {client_id} - {} - {}", chrono::offset::Local::now(), m.topic(), m.value());
+        // Handle system messages
         if m.topic().starts_with(SYSTEM_TOPIC_PREFIX) {
             match m.topic().trim_start_matches(SYSTEM_TOPIC_PREFIX) {
                 SUBSCRIBE_TOPIC => {
@@ -55,6 +59,9 @@ impl Server {
                 _ => (),
             }
         };
+        for client_id in subscribers.lock().unwrap().get_subscribers(m.topic()) {
+            println!("Sending message to {client_id}");
+        }
     }
 
     /// Maintain connection with a client and handle published messages
@@ -86,8 +93,9 @@ impl Server {
                 // println!("{:?}", message?.unwrap());
                 let m: Message = message.expect("message is Ok").expect("message is not None");
 
-                // Process received message in subtask
-                tokio::spawn(Server::on_receive(Arc::clone(&subscribers), reader.client_id().to_string(), m));
+                // Processing messages asynchronously breaks the temporal ordering of messages, leave as synchronous for now
+                // tokio::spawn(Server::on_receive(Arc::clone(&subscribers), reader.client_id().to_string(), m));
+                Server::on_receive(Arc::clone(&subscribers), reader.client_id().to_string(), m);
             }
 
             count += 1;
@@ -107,12 +115,12 @@ impl Server {
                 _ = Server::receive_loop(subscribers, r).await;
             });
 
-            let mut writer = MessageWriter::new(w);
-            tokio::spawn(async move {
-                _ = writer
-                    .send(Message::new("test", Value::Boolean(true)))
-                    .await;
-            });
+            // let mut writer = MessageWriter::new(w);
+            // tokio::spawn(async move {
+            //     _ = writer
+            //         .send(Message::new("test", Value::Boolean(true)))
+            //         .await;
+            // });
         }
     }
 }

@@ -45,8 +45,14 @@ pub struct MessageReader {
 }
 
 impl MessageReader {
+
     pub fn new(stream: OwnedReadHalf) -> MessageReader {
-        let client_id = stream.peer_addr().expect("Read stream has a peer address").to_string();
+        let client_id = match stream.peer_addr() {
+            Ok(addr) => addr.to_string(),
+            Err(e) => {
+                String::from("unknown")
+            }
+        };
         MessageReader {
             reader: stream,
             buffer: BytesMut::with_capacity(4096),
@@ -116,14 +122,14 @@ impl MessageWriter {
         Ok(())
     }
 
-    pub async fn write_loop(&mut self) {
-        loop {
-            // TODO replace with channel listener
-            self.send(Message::new("test", Value::Boolean(true)))
-                .await
-                .unwrap();
-        }
-    }
+    // pub async fn write_loop(&mut self) {
+    //     loop {
+    //         // TODO replace with channel listener
+    //         self.send(Message::new("test", Value::Boolean(true)))
+    //             .await
+    //             .unwrap();
+    //     }
+    // }
 }
 
 #[cfg(test)]
