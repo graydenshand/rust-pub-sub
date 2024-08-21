@@ -1,10 +1,12 @@
 use rmpv::Value;
+use tonic::client;
 
 use std::alloc::System;
 use std::error::Error;
 use std::time::{Instant};
 use chrono::DateTime;
 use std::sync::{Arc, Mutex};
+use uuid::Uuid;
 
 use tokio;
 
@@ -39,7 +41,7 @@ impl Server {
     }
 
     /// Process a message published by a client
-    fn on_receive(subscribers: Arc<Mutex<subscription_tree::SubscriptionTree<String>>>, client_id: String, m: Message) {
+    fn on_receive(subscribers: Arc<Mutex<subscription_tree::SubscriptionTree<String>>>, client_id: &String, m: Message) {
         println!("{:?} Message received - {client_id} - {} - {}", chrono::offset::Local::now(), m.topic(), m.value());
         // Handle system messages
         if m.topic().starts_with(SYSTEM_TOPIC_PREFIX) {
@@ -54,7 +56,7 @@ impl Server {
                     let mut subscribers = subscribers.lock().unwrap();
 
                     // Add new subscription entry to the subscriber tree
-                    subscribers.subscribe(&m.value().as_str().unwrap(), client_id);
+                    subscribers.subscribe(&m.value().as_str().unwrap(), client_id.to_string());
                 }
                 _ => (),
             }
@@ -65,7 +67,7 @@ impl Server {
     }
 
     /// Maintain connection with a client and handle published messages
-    pub async fn receive_loop(subscribers: Arc<Mutex<subscription_tree::SubscriptionTree<String>>>, stream: OwnedReadHalf) -> Result<(), Box<dyn Error>> {
+    pub async fn receive_loop(client_id: String, subscribers: Arc<Mutex<subscription_tree::SubscriptionTree<String>>>, stream: OwnedReadHalf) -> Result<(), Box<dyn Error>> {
         let mut reader = MessageReader::new(stream);
         let start = Instant::now();
 
@@ -75,7 +77,7 @@ impl Server {
             let message = reader.read_value().await;
             if message.is_err() || message.as_ref().unwrap().is_none() {
                 // Unsubscribe client from all topics
-                let _ = subscribers.lock().unwrap().unsubscribe_client(reader.client_id().to_string());
+                let _ = subscribers.lock().unwrap().unsubscribe_client(&client_id);
 
                 // Log stats about messages received from client
                 let end = Instant::now();
@@ -95,7 +97,7 @@ impl Server {
 
                 // Processing messages asynchronously breaks the temporal ordering of messages, leave as synchronous for now
                 // tokio::spawn(Server::on_receive(Arc::clone(&subscribers), reader.client_id().to_string(), m));
-                Server::on_receive(Arc::clone(&subscribers), reader.client_id().to_string(), m);
+                Server::on_receive(Arc::clone(&subscribers), &client_id, m);
             }
 
             count += 1;
@@ -108,11 +110,12 @@ impl Server {
 
         loop {
             let (stream, _) = listener.accept().await?;
+            let client_id = Uuid::new_v4();
             println!("Connection made");
             let (r, w) = stream.into_split();
             let subscribers = Arc::clone(&self.subscribers);
             tokio::spawn(async move {
-                _ = Server::receive_loop(subscribers, r).await;
+                _ = Server::receive_loop(client_id.to_string(), subscribers, r).await;
             });
 
             // let mut writer = MessageWriter::new(w);

@@ -32,3 +32,15 @@ Client <--(channel)-- ClientMessageReader
 Server <--(channel)-- ServerMessageReader
 Server --(channel)--> ServerMessageWriter
 ```
+
+
+
+Client should be able to:
+- Initialize a connection to a server
+- Publish messages to the server
+- Close connection to server
+
+OR
+
+- Build a stream of messages (possibly long lived)
+- Connection lives as long as stream of messages is not exhausted

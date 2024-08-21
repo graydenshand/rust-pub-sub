@@ -171,8 +171,8 @@ where
         }
     }
 
-    pub fn unsubscribe_client(&mut self, id: T) -> Result<(), &str> {
-        match self.subscribers.get(&id) {
+    pub fn unsubscribe_client(&mut self, id: &T) -> Result<(), &str> {
+        match self.subscribers.get(id) {
             Some(client_subscriptions) => {
                 let patterns = client_subscriptions.clone();
                 for pattern in patterns {

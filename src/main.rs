@@ -71,9 +71,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         },
         Some(Commands::TestClient{ address }) => {
             println!("Running test client...");
-            let client = Client::new();
+            let mut client = Client::new();
             // Add subscription to echo messages sent
-            // client.subscribe(address, "*").await?;
+            client.subscribe(address, "*").await?;
             // client.run();
             
             // Unreachable
