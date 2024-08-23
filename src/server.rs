@@ -1,9 +1,6 @@
 use rmpv::Value;
 use std::collections::HashMap;
 
-
-
-
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -47,12 +44,12 @@ impl Server {
 
     /// Process a message published by a client
     async fn on_receive(&self, client_id: &String, m: Message) {
-        println!(
-            "{:?} Message received - {client_id} - {} - {}",
-            chrono::offset::Local::now(),
-            m.topic(),
-            m.value()
-        );
+        // println!(
+        //     "{:?} Message received - {client_id} - {} - {}",
+        //     chrono::offset::Local::now(),
+        //     m.topic(),
+        //     m.value()
+        // );
         // Handle system messages
         if m.topic().starts_with(SYSTEM_TOPIC_PREFIX) {
             match m.topic().trim_start_matches(SYSTEM_TOPIC_PREFIX) {
@@ -76,16 +73,15 @@ impl Server {
 
         let write_channels = subscribers.iter().map(|client_id| {
             if let Some(tx) = self.write_channel_map.lock().unwrap().get(client_id) {
-                println!("Sending message to {client_id}");
+                // println!("Sending message to {client_id}");
                 tx.clone()
             } else {
-                println!("{:?}", (&subscribers, &self.write_channel_map));
                 panic!("Inconsistent state between subscribers and write_channel_map");
             }
         });
 
         for tx in write_channels {
-            tx.send(m.clone()).await.expect("Message was sent");
+            tx.send(m.clone()).await.ok();
         }
     }
 
@@ -156,7 +152,7 @@ impl Server {
                 .unwrap()
                 .insert(client_id.to_string(), tx1);
             tokio::spawn(async move {
-                writer.write_loop(rx).await;
+                writer.write_loop(rx).await.ok();
             });
 
             let tx2 = tx.clone();
@@ -164,7 +160,7 @@ impl Server {
                 loop {
                     tx2.send(Message::new("test", Value::from("Ping")))
                         .await
-                        .expect("Message was sent");
+                        .ok();
                     tokio::time::sleep(Duration::from_millis(1000)).await;
                 }
             });

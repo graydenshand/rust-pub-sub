@@ -147,7 +147,7 @@ impl Client {
                 // self.write_channel_map.insert(addr.clone(), wtx);
                 let mut writer = MessageWriter::new(w);
                 tokio::spawn(async move {
-                    writer.write_loop(wrx).await;
+                    writer.write_loop(wrx).await.ok();
                 });
                 // let (r,w) = tokio::join!(read_future, write_future);
                 // r.unwrap();
@@ -191,7 +191,7 @@ impl Client {
         // writer.send(Message::new("!system/client-id-registration", Value::String(Utf8String::from(self.id.clone()))));
 
         for message in stream {
-            println!("Sending message {message:?}");
+            // println!("Sending message {message:?}");
             writer.send(message).await.unwrap();
         }
     }

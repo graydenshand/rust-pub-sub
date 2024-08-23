@@ -113,11 +113,12 @@ impl MessageWriter {
     }
 
     // Listen for messages over async channel and forward over this connection
-    pub async fn write_loop(&mut self, mut rx: Receiver<Message>) {
+    pub async fn write_loop(&mut self, mut rx: Receiver<Message>) -> Result<(), Box<dyn Error>> {
         while let Some(message) = rx.recv().await {
             // println!("Sending Message {:?}",  message);
-            self.send(message).await.unwrap();
+            self.send(message).await?
         }
+        Ok(())
     }
 }
 

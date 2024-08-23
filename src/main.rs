@@ -17,13 +17,6 @@ use client::{Client};
 use datagram::Message;
 use rmpv::{Value};
 
-// #[derive(Parser, Debug)]
-// #[command(version, about, long_about = None)]
-// struct Args {
-/// Port to listen on
-// #[arg(short, long)]
-// port: u16,
-// }
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -79,26 +72,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .await;
 
             // Example: publish messages from separate tasks
-            // let channel_clone = channel.clone();
+            let channel_clone = channel.clone();
             let write_future = tokio::spawn(async move {
                 loop {
-                    // channel_clone.publish(Message::new("test", Value::from("Publishing from a separate task"))).await;
-                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    channel_clone.publish(Message::new("test", Value::from("Publishing from a separate task"))).await;
+                    // tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 }
             });
 
             // Event handler
             let read_future = tokio::spawn(async move {
                 while let Some(message) = channel.recv().await {
-                    println!("{message:?}");
-                    // Publish messages inside of message handler
-                    if message.value().is_str()
-                        && message.value().as_str().expect("Is string") == String::from("Ping")
-                    {
-                        channel
-                            .publish(Message::new("test", Value::from("Pong")))
-                            .await;
-                    }
+                    // println!("{message:?}");
                 }
             });
 
