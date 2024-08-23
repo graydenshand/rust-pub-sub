@@ -97,7 +97,7 @@ impl Client {
     }
 
     /// Loop forever receiving messages from a specific host, attempting to maintain connection with server
-    pub async fn connect(&mut self, addr: String, subscriptions: Vec<String>, tx: Sender<Message>) -> () {
+    pub async fn connect(&mut self, addr: String, subscriptions: Vec<String>, tx: Sender<Message>) -> Sender<Message> {
         let resp = TcpStream::connect(&addr).await;
         match resp {
             Ok(stream) => {
@@ -110,7 +110,7 @@ impl Client {
 
                 // write channel
                 let (wtx, wrx) = mpsc::channel(32);
-                self.write_channel_map.insert(addr.clone(), wtx);
+                // self.write_channel_map.insert(addr.clone(), wtx);
                 let mut writer = MessageWriter::new(w);
                 tokio::spawn(async move {
                     writer.write_loop(wrx).await;
@@ -127,6 +127,7 @@ impl Client {
             //             .await
             //             .expect("Subscription was sent");
             //     }
+                wtx
             }
             Err(e) => {
                 panic!("{e}");
@@ -134,11 +135,11 @@ impl Client {
         }
     }
 
-    pub async fn publish(&self, addr: &str, message: Message) {
-        if let Some(tx) = self.write_channel_map.get(addr) {
-            tx.send(message).await.unwrap();
-        }
-    }
+    // pub async fn publish(&self, addr: &str, message: Message) {
+    //     if let Some(tx) = self.write_channel_map.get(addr) {
+    //         tx.send(message).await.unwrap();
+    //     }
+    // }
 
     /// Publish a stream of messages to a broker
     pub async fn publish_stream<T: Iterator<Item=Message>>(&self, addr: &str, stream: T) {

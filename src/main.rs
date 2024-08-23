@@ -74,10 +74,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("Running test client...");
             let (tx, mut rx) = mpsc::channel(32);
             let mut client = Client::new();
-            client.connect(address.to_string(), vec![String::from("*")], tx).await;
+            let channel = client.connect(address.to_string(), vec![String::from("*")], tx).await;
+
+            let channel_clone = channel.clone();
             let read_future = tokio::spawn(async move {
                 while let Some(message) = rx.recv().await {
-                    println!("{message:?}")
+                    println!("{message:?}");
+                    // Send message inside of message handler
+                    channel_clone.send(Message::new("test", Value::from(0))).await.unwrap();
                 };
             });
             
@@ -94,13 +98,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             //     }).await
             // });
 
-            // Publish messages
-            let addr = address.to_string();    
+            // Publish messages from separate tasks
+            let channel_clone = channel.clone();  
             let write_future = tokio::spawn(async move {
                 loop {
                     for i in 0..10 {
-                        // messages.push(Message::new("test", Value::from(i)))
-                        client.publish(&addr, Message::new("test", Value::from(i))).await;
+                        channel_clone.send(Message::new("test", Value::from(i))).await.unwrap();
                     }
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 }
