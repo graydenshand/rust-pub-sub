@@ -206,7 +206,7 @@ mod tests {
         st.unsubscribe(&&0, "metrics").unwrap();
         assert!(st.get_subscribers("metrics") == HashSet::from([&1]));
 
-        st.unsubscribe_client(&1).unwrap();
+        st.unsubscribe_client(&&1).unwrap();
         assert!(st.get_subscribers("metrics") == HashSet::new());
     }
 }

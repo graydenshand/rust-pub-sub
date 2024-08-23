@@ -6,11 +6,11 @@ use rmp_serde;
 use std::error::Error;
 
 use bytes::{Buf, BytesMut};
-use std::time::Instant;
+
 use tokio;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{Receiver};
 
 pub const SYSTEM_TOPIC_PREFIX: &'static str = "!system";
 pub const SUBSCRIBE_TOPIC: &'static str = "/subscribe";

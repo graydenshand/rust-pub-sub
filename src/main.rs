@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 
 use std::error::Error;
 use tokio;
-use tokio::sync::mpsc;
+
 
 mod client;
 mod datagram;
@@ -13,9 +13,9 @@ mod server;
 mod subscription_tree;
 use server::Server;
 
-use client::{Client, Subscription};
+use client::{Client};
 use datagram::Message;
-use rmpv::{Utf8String, Value};
+use rmpv::{Value};
 
 // #[derive(Parser, Debug)]
 // #[command(version, about, long_about = None)]

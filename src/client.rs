@@ -5,21 +5,21 @@ use tokio::net::TcpStream;
 use crate::datagram::{
     Message, MessageReader, MessageWriter, SUBSCRIBE_TOPIC, SYSTEM_TOPIC_PREFIX,
 };
-use rmpv::{Utf8String, Value};
+use rmpv::{Value};
 use std::collections::HashMap;
 
 use tokio::sync::mpsc;
 
-use futures::future::join_all;
+
 // use rmpv::Value;
-use std::collections::HashSet;
+
 use std::error::Error;
 use tokio::sync::mpsc::{Receiver, Sender};
 
-use std::time::Duration;
+
 use tokio;
-use tokio::fs::File;
-use tokio::io::AsyncReadExt;
+
+
 
 #[derive(Debug, Clone)]
 pub struct Subscription {
@@ -131,7 +131,7 @@ impl Client {
 
     /// Loop forever receiving messages from a specific host, attempting to maintain connection with server
     pub async fn connect(&mut self, addr: String, subscriptions: Vec<String>) -> Connection {
-        let (tx, mut rx) = mpsc::channel(32);
+        let (tx, rx) = mpsc::channel(32);
         let resp = TcpStream::connect(&addr).await;
         match resp {
             Ok(stream) => {
