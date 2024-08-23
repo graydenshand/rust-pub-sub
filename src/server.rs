@@ -3,12 +3,13 @@ use tonic::client;
 
 use std::alloc::System;
 use std::error::Error;
-use std::time::{Instant};
+use std::time::{Instant, Duration};
 use chrono::DateTime;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 use tokio;
+use tokio::sync::mpsc;
 
 use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::TcpListener;
@@ -44,26 +45,26 @@ impl Server {
     fn on_receive(subscribers: Arc<Mutex<subscription_tree::SubscriptionTree<String>>>, client_id: &String, m: Message) {
         println!("{:?} Message received - {client_id} - {} - {}", chrono::offset::Local::now(), m.topic(), m.value());
         // Handle system messages
-        if m.topic().starts_with(SYSTEM_TOPIC_PREFIX) {
-            match m.topic().trim_start_matches(SYSTEM_TOPIC_PREFIX) {
-                SUBSCRIBE_TOPIC => {
-                    // Message value contains subscription pattern
-                    println!(
-                        "New subscription request: {:?}",
-                        (client_id.to_string(), &m.value().as_str().unwrap())
-                    );
-                    // Wait for ownership of mutex lock
-                    let mut subscribers = subscribers.lock().unwrap();
+        // if m.topic().starts_with(SYSTEM_TOPIC_PREFIX) {
+        //     match m.topic().trim_start_matches(SYSTEM_TOPIC_PREFIX) {
+        //         SUBSCRIBE_TOPIC => {
+        //             // Message value contains subscription pattern
+        //             println!(
+        //                 "New subscription request: {:?}",
+        //                 (client_id.to_string(), &m.value().as_str().unwrap())
+        //             );
+        //             // Wait for ownership of mutex lock
+        //             let mut subscribers = subscribers.lock().unwrap();
 
-                    // Add new subscription entry to the subscriber tree
-                    subscribers.subscribe(&m.value().as_str().unwrap(), client_id.to_string());
-                }
-                _ => (),
-            }
-        };
-        for client_id in subscribers.lock().unwrap().get_subscribers(m.topic()) {
-            println!("Sending message to {client_id}");
-        }
+        //             // Add new subscription entry to the subscriber tree
+        //             subscribers.subscribe(&m.value().as_str().unwrap(), client_id.to_string());
+        //         }
+        //         _ => (),
+        //     }
+        // };
+        // for client_id in subscribers.lock().unwrap().get_subscribers(m.topic()) {
+        //     println!("Sending message to {client_id}");
+        // }
     }
 
     /// Maintain connection with a client and handle published messages
@@ -118,12 +119,21 @@ impl Server {
                 _ = Server::receive_loop(client_id.to_string(), subscribers, r).await;
             });
 
-            // let mut writer = MessageWriter::new(w);
-            // tokio::spawn(async move {
-            //     _ = writer
-            //         .send(Message::new("test", Value::Boolean(true)))
-            //         .await;
-            // });
+            let mut writer = MessageWriter::new(w);
+            tokio::spawn(async move {
+                loop {
+                    {
+                        let res = writer
+                        .send(Message::new("test", Value::Boolean(true)))
+                        .await;
+                        if res.is_err() {
+                            return
+                        }
+                    }
+
+                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                }
+            });
         }
     }
 }

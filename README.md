@@ -36,11 +36,9 @@ Server --(channel)--> ServerMessageWriter
 
 
 Client should be able to:
-- Initialize a connection to a server
-- Publish messages to the server
-- Close connection to server
+- Publish a message to a server
+- Subscribe to messages on a server matching a topic pattern, registering a function to execute every time a message matching that pattern is published.
+- Publish a message to a server from a subscription handler
 
-OR
+- Client may be publishing to the same, or different servers than it's subscribed to
 
-- Build a stream of messages (possibly long lived)
-- Connection lives as long as stream of messages is not exhausted

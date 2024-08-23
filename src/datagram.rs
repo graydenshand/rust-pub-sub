@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use rmp_serde;
 use std::error::Error;
 
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 use bytes::{Buf, BytesMut};
 use std::time::Instant;
 use tokio;
@@ -38,30 +39,18 @@ impl Message {
     }
 }
 
+/// Read half of a connection
 pub struct MessageReader {
-    reader: OwnedReadHalf,
+    stream: OwnedReadHalf,
     buffer: BytesMut,
-    client_id: String
 }
 
 impl MessageReader {
-
     pub fn new(stream: OwnedReadHalf) -> MessageReader {
-        let client_id = match stream.peer_addr() {
-            Ok(addr) => addr.to_string(),
-            Err(e) => {
-                String::from("unknown")
-            }
-        };
         MessageReader {
-            reader: stream,
+            stream,
             buffer: BytesMut::with_capacity(4096),
-            client_id,
         }
-    }
-
-    pub fn client_id(&self) -> &str {
-        return &self.client_id
     }
 
     fn parse_value(&mut self) -> (Option<Message>, usize) {
@@ -89,8 +78,8 @@ impl MessageReader {
             //
             // On success, the number of bytes is returned. `0`
             // indicates "end of stream".
-            self.reader.readable().await?;
-            let bytes_read = self.reader.read_buf(&mut self.buffer).await?;
+            self.stream.readable().await?;
+            let bytes_read = self.stream.read_buf(&mut self.buffer).await?;
             if bytes_read == 0 {
                 // The remote closed the connection. For this to be
                 // a clean shutdown, there should be no data in the
@@ -104,8 +93,10 @@ impl MessageReader {
             }
         }
     }
+
 }
 
+/// Write half of a connection
 pub struct MessageWriter {
     writer: OwnedWriteHalf,
 }
@@ -121,15 +112,6 @@ impl MessageWriter {
         self.writer.write(&mut buf).await?;
         Ok(())
     }
-
-    // pub async fn write_loop(&mut self) {
-    //     loop {
-    //         // TODO replace with channel listener
-    //         self.send(Message::new("test", Value::Boolean(true)))
-    //             .await
-    //             .unwrap();
-    //     }
-    // }
 }
 
 #[cfg(test)]

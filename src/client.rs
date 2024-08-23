@@ -6,11 +6,16 @@ use crate::datagram::{
     Message, MessageReader, MessageWriter, SUBSCRIBE_TOPIC, SYSTEM_TOPIC_PREFIX,
 };
 use rmpv::{Value, Utf8String};
+use std::collections::HashMap;
+
+
+use tokio::sync::mpsc;
 
 use futures::future::join_all;
 // use rmpv::Value;
 use std::collections::HashSet;
 use std::error::Error;
+use tokio::sync::mpsc::Sender;
 
 use std::time::Duration;
 use tokio;
@@ -18,7 +23,7 @@ use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 
 #[derive(Debug, Clone)]
-struct Subscription {
+pub struct Subscription {
     addr: String,
     pattern: String,
 }
@@ -27,18 +32,19 @@ struct Subscription {
 const SERVER_POLL_INTERVAL_MS: u64 = 1000;
 
 /// An async message passing application
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Client {
-    /// Unique ID for this client, used to register subscriptions & route messages on server
-    // id: String,
     /// List of this Client's subscriptions
     subscriptions: Vec<Subscription>,
+    /// Map of addresses to write channels
+    write_channel_map: HashMap<String, Sender<Message>>
 }
 impl Client {
     pub fn new() -> Client {
         Client {
             subscriptions: Vec::new(),
             // id: Uuid::new_v4().to_string(),
+            write_channel_map: HashMap::new(),
         }
     }
 
@@ -78,67 +84,66 @@ impl Client {
     //     Ok(subscriptions)
     // }
 
-    async fn receive_loop(stream: OwnedReadHalf) -> Result<(), Box<dyn Error>> {
+    async fn receive_loop(stream: OwnedReadHalf, tx: Sender<Message>) -> Result<(), Box<dyn Error>>{
         let mut reader = MessageReader::new(stream);
         loop {
-            let message = reader.read_value().await;
-            if message.is_err() || message.as_ref().unwrap().is_none() {
-                println!("Disconnected");
-                return Ok(());
+            let message = reader.read_value().await?;
+            if let Some(m) = message {
+                tx.send(m).await?;
             } else {
-                let m: Message = message.expect("message is Ok").expect("message is not None");
-                println!("{m:?}");
+                return Ok(())
             }
         }
     }
 
     /// Loop forever receiving messages from a specific host, attempting to maintain connection with server
-    async fn server_connection(&self, addr: String, subscriptions: Vec<String>) -> () {
-        loop {
-            // let resp = TcpStream::connect(&addr).await;
-            // match resp {
-            //     Ok(stream) => {
-            //         println!("Connected: {}", addr);
+    pub async fn connect(&self, addr: String, subscriptions: Vec<String>, tx: Sender<Message>) -> () {
+        let resp = TcpStream::connect(&addr).await;
+        match resp {
+            Ok(stream) => {
+                println!("Connected: {}", &addr);
+                let (r, w) = stream.into_split();
+                
+                tokio::spawn(async move {
+                    _ = Client::receive_loop(r, tx).await.unwrap();
+                });
 
-            //         let (r, w) = stream.into_split();
-                    
-            //         let read_future = tokio::spawn(async move {
-            //             _ = Client::receive_loop(r).await.unwrap();
-            //         });
+                // write channel
+                // let (wtx, wrx) = mpsc::channel(32);
+                // self.write_channel_map.insert(addr.clone(), wtx);
+                // let mut writer = MessageWriter::new(w);
+                // let subs = subscriptions.clone();
+                // for s in subs {
+                //     // println!("Subscribe: {}", s);
+                //     let topic = format!("{}{}", SYSTEM_TOPIC_PREFIX, SUBSCRIBE_TOPIC);
+                //     writer
+                //         .send(Message::new(&topic, Value::from(s)))
+                //         .await
+                //         .expect("Subscription was sent");
+                // }
 
-            //         let mut writer = MessageWriter::new(w);
-            //         let subs = subscriptions.clone();
-            //         for s in subs {
-            //             // println!("Subscribe: {}", s);
-            //             let topic = format!("{}{}", SYSTEM_TOPIC_PREFIX, SUBSCRIBE_TOPIC);
-            //             writer
-            //                 .send(Message::new(&topic, Value::from(s)))
-            //                 .await
-            //                 .expect("Subscription was sent");
-            //         }
+                // tokio::spawn(async move {
+                //     // TEST
+                //     loop {
+                //         writer.send(Message::new("test", Value::from(0))).await;
+                //     }
+                // });
+            }
+            Err(e) => {
+                panic!("{e}");
+            }
+        }
+    }
 
-            //         let write_future = tokio::spawn(async move {
-            //             _ = writer.write_loop().await;
-            //         });
-            //         let (r, w) = tokio::join!(read_future, write_future);
-            //         if r.is_err() {
-            //             continue;
-            //         };
-            //         if w.is_err() {
-            //             continue;
-            //         };
-            //     }
-            //     Err(e) => {
-            //         println!("{:?}", e);
-            //         tokio::time::sleep(Duration::from_millis(SERVER_POLL_INTERVAL_MS)).await;
-            //         continue;
-            //     }
-            // }
+    pub async fn publish(&self, addr: &str, message: Message) {
+        println!("Publish");
+        if let Some(tx) = self.write_channel_map.get(addr) {
+            tx.send(message).await.unwrap();
         }
     }
 
     /// Publish a stream of messages to a broker
-    pub async fn publish<T: Iterator<Item=Message>>(&self, addr: &str, stream: T) {
+    pub async fn publish_stream<T: Iterator<Item=Message>>(&self, addr: &str, stream: T) {
         let conn = TcpStream::connect(&addr).await.expect("Unable to connect to server");
 
         let (_, w) = conn.into_split();
@@ -153,23 +158,28 @@ impl Client {
         }
     }
 
-    /// Manage client connections
-    pub async fn run(&self) {
-        let mut futures = vec![];
-        let unique_hosts =
-            HashSet::<String>::from_iter(self.subscriptions.iter().map(|s| s.addr.clone()));
+    // Manage client connections
+    // pub async fn run<F>(&mut self, f: F) where F: Fn(Message) {
+    //     let mut futures = vec![];
+    //     let unique_hosts =
+    //         HashSet::<String>::from_iter(self.subscriptions.iter().map(|s| s.addr.clone()));
+    //     let (tx, mut rx) = mpsc::channel(32);
 
-        unique_hosts.into_iter().for_each(|addr| {
-            let subscriptions = Vec::from_iter(
-                self.subscriptions
-                    .iter()
-                    .filter(|s| s.addr == *addr)
-                    .map(|s| s.pattern.clone()),
-            );
-            let future = self.server_connection(addr.clone(), subscriptions);
-            futures.push(future);
-        });
-        join_all(futures).await;
-    }
+    //     for addr in unique_hosts.into_iter() {
+    //         let subscriptions = Vec::from_iter(
+    //             self.subscriptions
+    //                 .iter()
+    //                 .filter(|s| s.addr == *addr)
+    //                 .map(|s| s.pattern.clone()),
+    //         );
+    //         let future = self.connect(addr, subscriptions, tx.clone());
+    //         futures.push(future);
+    //     };
+
+    //     // while let Some(message) = rx.recv().await {
+    //     //     f(message);
+    //     // }
+    //     join_all(futures).await;
+    // }
 
 }

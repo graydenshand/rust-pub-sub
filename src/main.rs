@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 
 use std::error::Error;
 use tokio;
+use tokio::sync::mpsc;
 
 mod client;
 mod datagram;
@@ -12,7 +13,7 @@ mod server;
 mod subscription_tree;
 use server::Server;
 
-use client::Client;
+use client::{Client, Subscription};
 use datagram::Message;
 use rmpv::{Value, Utf8String};
 
@@ -71,27 +72,38 @@ async fn main() -> Result<(), Box<dyn Error>> {
         },
         Some(Commands::TestClient{ address }) => {
             println!("Running test client...");
+            let (tx, mut rx) = mpsc::channel(32);
             let mut client = Client::new();
+            client.connect(address.to_string(), vec![String::from("*")], tx).await;
+            while let Some(message) = rx.recv().await {
+                println!("{message:?}")
+            };
             // Add subscription to echo messages sent
-            client.subscribe(address, "*").await?;
-            // client.run();
+            // client.subscribe(address, "*").await?;
+            // client.run(|message| {
+            //     println!("{message:?}");
+            // }).await
             
-            // Unreachable
-            loop {
-                
-                let mut messages = vec![];
-                for i in 0..10 {
-                    messages.push(Message::new("test", Value::from(i)))
-                }
-                
-                client.publish(address, messages.into_iter()).await;
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-            }
+            // Receive messages
+            // tokio::spawn(async move {
+            //     client.run(|message| {
+            //         println!("{message:?}");
+            //     }).await
+            // });
+
+            // Publish messages            
+            // tokio::spawn(async move {
+            //     loop {
+            //         for i in 0..10 {
+            //             // messages.push(Message::new("test", Value::from(i)))
+            //             client.publish(address, Message::new("test", Value::from(i))).await;
+            //         }
+            //         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            //     }
+            // });
         }
         None => {}
-    }
-    
-
+    };
     
     Ok(())
 }
