@@ -171,8 +171,8 @@ where
         }
     }
 
-    pub fn unsubscribe_client(&mut self, id: T) -> Result<(), &str> {
-        match self.subscribers.get(&id) {
+    pub fn unsubscribe_client(&mut self, id: &T) -> Result<(), &str> {
+        match self.subscribers.get(id) {
             Some(client_subscriptions) => {
                 let patterns = client_subscriptions.clone();
                 for pattern in patterns {
@@ -206,7 +206,7 @@ mod tests {
         st.unsubscribe(&&0, "metrics").unwrap();
         assert!(st.get_subscribers("metrics") == HashSet::from([&1]));
 
-        st.unsubscribe_client(&1).unwrap();
+        st.unsubscribe_client(&&1).unwrap();
         assert!(st.get_subscribers("metrics") == HashSet::new());
     }
 }
