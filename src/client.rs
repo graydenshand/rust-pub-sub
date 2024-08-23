@@ -5,9 +5,8 @@ use tokio::net::TcpStream;
 use crate::datagram::{
     Message, MessageReader, MessageWriter, SUBSCRIBE_TOPIC, SYSTEM_TOPIC_PREFIX,
 };
-use rmpv::{Value, Utf8String};
+use rmpv::{Utf8String, Value};
 use std::collections::HashMap;
-
 
 use tokio::sync::mpsc;
 
@@ -15,7 +14,7 @@ use futures::future::join_all;
 // use rmpv::Value;
 use std::collections::HashSet;
 use std::error::Error;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 use std::time::Duration;
 use tokio;
@@ -28,6 +27,34 @@ pub struct Subscription {
     pattern: String,
 }
 
+pub struct Connection {
+    tx: Sender<Message>,
+    rx: Option<Receiver<Message>>,
+    addr: String,
+}
+impl Clone for Connection {
+    fn clone(&self) -> Self {
+        Connection {
+            tx: self.tx.clone(),
+            rx: None, // only one owner of rx allowed
+            addr: self.addr.clone(),
+        }
+    }
+}
+impl Connection {
+    pub async fn publish(&self, message: Message) {
+        self.tx.send(message).await.expect("Message was sent")
+    }
+
+    pub async fn recv(&mut self) -> Option<Message> {
+        if self.rx.is_some() {
+            self.rx.as_mut().unwrap().recv().await
+        } else {
+            panic!("Cannot call recv on a clone")
+        }
+    }
+}
+
 // Delay before retrying server connections upon failure, in milliseconds
 const SERVER_POLL_INTERVAL_MS: u64 = 1000;
 
@@ -37,7 +64,7 @@ pub struct Client {
     /// List of this Client's subscriptions
     subscriptions: Vec<Subscription>,
     /// Map of addresses to write channels
-    write_channel_map: HashMap<String, Sender<Message>>
+    write_channel_map: HashMap<String, Sender<Message>>,
 }
 impl Client {
     pub fn new() -> Client {
@@ -49,7 +76,10 @@ impl Client {
     }
 
     pub async fn subscribe(&mut self, addr: &str, pattern: &str) -> Result<(), Box<dyn Error>> {
-        self.subscriptions.push(Subscription{ addr: addr.to_string(), pattern: pattern.to_string() });
+        self.subscriptions.push(Subscription {
+            addr: addr.to_string(),
+            pattern: pattern.to_string(),
+        });
         Ok(())
     }
 
@@ -84,26 +114,30 @@ impl Client {
     //     Ok(subscriptions)
     // }
 
-    async fn receive_loop(stream: OwnedReadHalf, tx: Sender<Message>) -> Result<(), Box<dyn Error>>{
+    async fn receive_loop(
+        stream: OwnedReadHalf,
+        tx: Sender<Message>,
+    ) -> Result<(), Box<dyn Error>> {
         let mut reader = MessageReader::new(stream);
         loop {
             let message = reader.read_value().await?;
             if let Some(m) = message {
                 tx.send(m).await?;
             } else {
-                return Ok(())
+                return Ok(());
             }
         }
     }
 
     /// Loop forever receiving messages from a specific host, attempting to maintain connection with server
-    pub async fn connect(&mut self, addr: String, subscriptions: Vec<String>, tx: Sender<Message>) -> Sender<Message> {
+    pub async fn connect(&mut self, addr: String, subscriptions: Vec<String>) -> Connection {
+        let (tx, mut rx) = mpsc::channel(32);
         let resp = TcpStream::connect(&addr).await;
         match resp {
             Ok(stream) => {
                 println!("Connected: {}", &addr);
                 let (r, w) = stream.into_split();
-                
+
                 tokio::spawn(async move {
                     _ = Client::receive_loop(r, tx).await.unwrap();
                 });
@@ -118,16 +152,19 @@ impl Client {
                 // let (r,w) = tokio::join!(read_future, write_future);
                 // r.unwrap();
                 // w.unwrap();
-            //     let subs = subscriptions.clone();
-            //     for s in subs {
-            //         // println!("Subscribe: {}", s);
-            //         let topic = format!("{}{}", SYSTEM_TOPIC_PREFIX, SUBSCRIBE_TOPIC);
-            //         writer
-            //             .send(Message::new(&topic, Value::from(s)))
-            //             .await
-            //             .expect("Subscription was sent");
-            //     }
-                wtx
+                let subs = subscriptions.clone();
+                for s in subs {
+                    // println!("Subscribe: {}", s);
+                    let topic = format!("{}{}", SYSTEM_TOPIC_PREFIX, SUBSCRIBE_TOPIC);
+                    wtx.send(Message::new(&topic, Value::from(s)))
+                        .await
+                        .expect("Message was sent");
+                }
+                Connection {
+                    tx: wtx,
+                    rx: Some(rx),
+                    addr,
+                }
             }
             Err(e) => {
                 panic!("{e}");
@@ -142,8 +179,10 @@ impl Client {
     // }
 
     /// Publish a stream of messages to a broker
-    pub async fn publish_stream<T: Iterator<Item=Message>>(&self, addr: &str, stream: T) {
-        let conn = TcpStream::connect(&addr).await.expect("Unable to connect to server");
+    pub async fn publish_stream<T: Iterator<Item = Message>>(&self, addr: &str, stream: T) {
+        let conn = TcpStream::connect(&addr)
+            .await
+            .expect("Unable to connect to server");
 
         let (_, w) = conn.into_split();
 
@@ -180,5 +219,4 @@ impl Client {
     //     // }
     //     join_all(futures).await;
     // }
-
 }

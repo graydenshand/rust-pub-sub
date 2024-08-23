@@ -15,15 +15,14 @@ use server::Server;
 
 use client::{Client, Subscription};
 use datagram::Message;
-use rmpv::{Value, Utf8String};
-
+use rmpv::{Utf8String, Value};
 
 // #[derive(Parser, Debug)]
 // #[command(version, about, long_about = None)]
 // struct Args {
-    /// Port to listen on
-    // #[arg(short, long)]
-    // port: u16,
+/// Port to listen on
+// #[arg(short, long)]
+// port: u16,
 // }
 
 #[derive(Parser)]
@@ -67,45 +66,39 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     match &cli.command {
         Some(Commands::Server { port }) => {
-            let server = Server::new(*port).await?;
+            let mut server = Server::new(*port).await?;
             server.run().await?;
-        },
-        Some(Commands::TestClient{ address }) => {
+        }
+        Some(Commands::TestClient { address }) => {
             println!("Running test client...");
-            let (tx, mut rx) = mpsc::channel(32);
             let mut client = Client::new();
-            let channel = client.connect(address.to_string(), vec![String::from("*")], tx).await;
 
-            let channel_clone = channel.clone();
-            let read_future = tokio::spawn(async move {
-                while let Some(message) = rx.recv().await {
-                    println!("{message:?}");
-                    // Send message inside of message handler
-                    channel_clone.send(Message::new("test", Value::from(0))).await.unwrap();
-                };
-            });
-            
-            // Add subscription to echo messages sent
-            // client.subscribe(address, "*").await?;
-            // client.run(|message| {
-            //     println!("{message:?}");
-            // }).await
-            
-            // Receive messages
-            // tokio::spawn(async move {
-            //     client.run(|message| {
-            //         println!("{message:?}");
-            //     }).await
-            // });
+            // Connect to server at specified address
+            let mut channel = client
+                .connect(address.to_string(), vec![String::from("*")])
+                .await;
 
-            // Publish messages from separate tasks
-            let channel_clone = channel.clone();  
+            // Example: publish messages from separate tasks
+            // let channel_clone = channel.clone();
             let write_future = tokio::spawn(async move {
                 loop {
-                    for i in 0..10 {
-                        channel_clone.send(Message::new("test", Value::from(i))).await.unwrap();
-                    }
+                    // channel_clone.publish(Message::new("test", Value::from("Publishing from a separate task"))).await;
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                }
+            });
+
+            // Event handler
+            let read_future = tokio::spawn(async move {
+                while let Some(message) = channel.recv().await {
+                    println!("{message:?}");
+                    // Publish messages inside of message handler
+                    if message.value().is_str()
+                        && message.value().as_str().expect("Is string") == String::from("Ping")
+                    {
+                        channel
+                            .publish(Message::new("test", Value::from("Pong")))
+                            .await;
+                    }
                 }
             });
 
@@ -115,6 +108,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         None => {}
     };
-    
+
     Ok(())
 }

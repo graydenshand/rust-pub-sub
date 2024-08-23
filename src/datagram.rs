@@ -5,17 +5,17 @@ use serde::{Deserialize, Serialize};
 use rmp_serde;
 use std::error::Error;
 
-use tokio::sync::mpsc::{Receiver, Sender, channel};
 use bytes::{Buf, BytesMut};
 use std::time::Instant;
 use tokio;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 pub const SYSTEM_TOPIC_PREFIX: &'static str = "!system";
 pub const SUBSCRIBE_TOPIC: &'static str = "/subscribe";
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Message {
     topic: String,
     value: Value,
@@ -93,7 +93,6 @@ impl MessageReader {
             }
         }
     }
-
 }
 
 /// Write half of a connection
@@ -116,7 +115,7 @@ impl MessageWriter {
     // Listen for messages over async channel and forward over this connection
     pub async fn write_loop(&mut self, mut rx: Receiver<Message>) {
         while let Some(message) = rx.recv().await {
-            println!("Sending Message {:?}",  message);
+            // println!("Sending Message {:?}",  message);
             self.send(message).await.unwrap();
         }
     }
