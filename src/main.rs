@@ -75,9 +75,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let (tx, mut rx) = mpsc::channel(32);
             let mut client = Client::new();
             client.connect(address.to_string(), vec![String::from("*")], tx).await;
-            while let Some(message) = rx.recv().await {
-                println!("{message:?}")
-            };
+            let read_future = tokio::spawn(async move {
+                while let Some(message) = rx.recv().await {
+                    println!("{message:?}")
+                };
+            });
+            
             // Add subscription to echo messages sent
             // client.subscribe(address, "*").await?;
             // client.run(|message| {
@@ -91,16 +94,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
             //     }).await
             // });
 
-            // Publish messages            
-            // tokio::spawn(async move {
-            //     loop {
-            //         for i in 0..10 {
-            //             // messages.push(Message::new("test", Value::from(i)))
-            //             client.publish(address, Message::new("test", Value::from(i))).await;
-            //         }
-            //         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-            //     }
-            // });
+            // Publish messages
+            let addr = address.to_string();    
+            let write_future = tokio::spawn(async move {
+                loop {
+                    for i in 0..10 {
+                        // messages.push(Message::new("test", Value::from(i)))
+                        client.publish(&addr, Message::new("test", Value::from(i))).await;
+                    }
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                }
+            });
+
+            let (r, w) = tokio::join!(read_future, write_future);
+            r.unwrap();
+            w.unwrap();
         }
         None => {}
     };

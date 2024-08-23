@@ -97,7 +97,7 @@ impl Client {
     }
 
     /// Loop forever receiving messages from a specific host, attempting to maintain connection with server
-    pub async fn connect(&self, addr: String, subscriptions: Vec<String>, tx: Sender<Message>) -> () {
+    pub async fn connect(&mut self, addr: String, subscriptions: Vec<String>, tx: Sender<Message>) -> () {
         let resp = TcpStream::connect(&addr).await;
         match resp {
             Ok(stream) => {
@@ -109,25 +109,24 @@ impl Client {
                 });
 
                 // write channel
-                // let (wtx, wrx) = mpsc::channel(32);
-                // self.write_channel_map.insert(addr.clone(), wtx);
-                // let mut writer = MessageWriter::new(w);
-                // let subs = subscriptions.clone();
-                // for s in subs {
-                //     // println!("Subscribe: {}", s);
-                //     let topic = format!("{}{}", SYSTEM_TOPIC_PREFIX, SUBSCRIBE_TOPIC);
-                //     writer
-                //         .send(Message::new(&topic, Value::from(s)))
-                //         .await
-                //         .expect("Subscription was sent");
-                // }
-
-                // tokio::spawn(async move {
-                //     // TEST
-                //     loop {
-                //         writer.send(Message::new("test", Value::from(0))).await;
-                //     }
-                // });
+                let (wtx, wrx) = mpsc::channel(32);
+                self.write_channel_map.insert(addr.clone(), wtx);
+                let mut writer = MessageWriter::new(w);
+                tokio::spawn(async move {
+                    writer.write_loop(wrx).await;
+                });
+                // let (r,w) = tokio::join!(read_future, write_future);
+                // r.unwrap();
+                // w.unwrap();
+            //     let subs = subscriptions.clone();
+            //     for s in subs {
+            //         // println!("Subscribe: {}", s);
+            //         let topic = format!("{}{}", SYSTEM_TOPIC_PREFIX, SUBSCRIBE_TOPIC);
+            //         writer
+            //             .send(Message::new(&topic, Value::from(s)))
+            //             .await
+            //             .expect("Subscription was sent");
+            //     }
             }
             Err(e) => {
                 panic!("{e}");
@@ -136,7 +135,6 @@ impl Client {
     }
 
     pub async fn publish(&self, addr: &str, message: Message) {
-        println!("Publish");
         if let Some(tx) = self.write_channel_map.get(addr) {
             tx.send(message).await.unwrap();
         }
