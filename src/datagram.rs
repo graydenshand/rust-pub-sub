@@ -7,14 +7,11 @@ use std::error::Error;
 
 use bytes::{Buf, BytesMut};
 
+use crate::config;
 use tokio;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::mpsc::Receiver;
-
-pub const SYSTEM_TOPIC_PREFIX: &'static str = "!system";
-pub const SUBSCRIBE_TOPIC: &'static str = "/subscribe";
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Message {
     topic: String,
@@ -53,15 +50,16 @@ impl MessageReader {
         }
     }
 
+    /// Parse a MessagePack Value from buffer
     fn parse_value(&mut self) -> (Option<Message>, usize) {
         let buf = &mut &self.buffer[..];
         let start_len = buf.len();
         let message = rmp_serde::decode::from_read::<&mut &[u8], Message>(buf).ok();
         let end_len = buf.len();
-
         (message, (start_len - end_len))
     }
 
+    /// Read a message from the stream
     pub async fn read_value(&mut self) -> Result<Option<Message>, Box<dyn Error>> {
         loop {
             // Attempt to parse a frame from the buffered data. If
@@ -97,25 +95,28 @@ impl MessageReader {
 
 /// Write half of a connection
 pub struct MessageWriter {
-    writer: OwnedWriteHalf,
+    stream: OwnedWriteHalf,
 }
 
 impl MessageWriter {
     pub fn new(stream: OwnedWriteHalf) -> MessageWriter {
-        MessageWriter { writer: stream }
+        MessageWriter { stream }
     }
 
+    /// Send a message over this connection
     pub async fn send(&mut self, message: Message) -> Result<(), Box<dyn Error>> {
         let mut buf = Vec::new();
         message.serialize(&mut Serializer::new(&mut buf)).unwrap();
-        self.writer.write(&mut buf).await?;
+        self.stream.write(&mut buf).await?;
         Ok(())
     }
 
     // Listen for messages over async channel and forward over this connection
-    pub async fn write_loop(&mut self, mut rx: Receiver<Message>) -> Result<(), Box<dyn Error>> {
+    pub async fn subscribe_to_channel(
+        &mut self,
+        mut rx: Receiver<Message>,
+    ) -> Result<(), Box<dyn Error>> {
         while let Some(message) = rx.recv().await {
-            // println!("Sending Message {:?}",  message);
             self.send(message).await?
         }
         Ok(())

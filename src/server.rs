@@ -1,7 +1,7 @@
 use rmpv::Value;
 use std::collections::HashMap;
 
-use log::{debug, info};
+use log::{debug, info, warn};
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -13,9 +13,8 @@ use tokio::sync::mpsc;
 use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::TcpListener;
 
-use crate::datagram::{
-    Message, MessageReader, MessageWriter, SUBSCRIBE_TOPIC, SYSTEM_TOPIC_PREFIX,
-};
+use crate::config;
+use crate::datagram::{Message, MessageReader, MessageWriter};
 use crate::subscription_tree::{self};
 
 #[derive(Debug, Clone)]
@@ -49,9 +48,9 @@ impl Server {
         let value = m.value();
         debug!("Message received - {client_id} - {topic} {value}");
         // Handle system messages
-        if m.topic().starts_with(SYSTEM_TOPIC_PREFIX) {
-            match m.topic().trim_start_matches(SYSTEM_TOPIC_PREFIX) {
-                SUBSCRIBE_TOPIC => {
+        if m.topic().starts_with(config::SYSTEM_TOPIC_PREFIX) {
+            match m.topic().trim_start_matches(config::SYSTEM_TOPIC_PREFIX) {
+                config::SUBSCRIBE_TOPIC => {
                     // Message value contains subscription pattern
                     debug!(
                         "New subscription request - {} - {}",
@@ -63,8 +62,12 @@ impl Server {
 
                     // Add new subscription entry to the subscriber tree
                     subscribers.subscribe(&m.value().as_str().unwrap(), client_id.to_string());
+
+                    // Broadcast only to system subscribers
                 }
-                _ => (),
+                _ => {
+                    warn!("Message published to unrecognized system topic: {topic}");
+                }
             }
         };
 
@@ -116,10 +119,7 @@ impl Server {
                 let m: Message = message
                     .expect("message is Ok")
                     .expect("message is not None");
-                debug!("Message received - {} - {:?}", m.topic(), m.value());
 
-                // Processing messages asynchronously breaks the temporal ordering of messages, leave as synchronous for now
-                // tokio::spawn(Server::on_receive(Arc::clone(&subscribers), reader.client_id().to_string(), m));
                 self.on_receive(&client_id, m).await;
             }
 
@@ -143,14 +143,14 @@ impl Server {
             });
 
             let mut writer = MessageWriter::new(w);
-            let (tx, rx) = mpsc::channel(32);
+            let (tx, rx) = mpsc::channel(config::CHANNEL_BUFFER_SIZE);
             let tx1 = tx.clone();
             self.write_channel_map
                 .lock()
                 .unwrap()
                 .insert(client_id.to_string(), tx1);
             tokio::spawn(async move {
-                writer.write_loop(rx).await.ok();
+                writer.subscribe_to_channel(rx).await.ok();
             });
 
             let tx2 = tx.clone();

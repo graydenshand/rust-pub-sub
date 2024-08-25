@@ -9,6 +9,7 @@ use std::error::Error;
 use tokio;
 
 mod client;
+mod config;
 mod datagram;
 mod server;
 mod subscription_tree;
@@ -70,29 +71,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         Some(Commands::TestClient { address }) => {
             println!("Running test client...");
-            let mut client = Client::new();
+            let mut client = Client::new(address.to_string()).await;
+            client.subscribe("*").await;
 
-            // Connect to server at specified address
-            let mut conn = client
-                .connect(address.to_string(), vec![String::from("*")])
-                .await;
-
-            let conn_clone = conn.clone();
+            let client_clone = client.clone();
             let write_future = tokio::spawn(async move {
                 loop {
-                    conn_clone
+                    client_clone
                         .publish(Message::new(
                             "test",
                             Value::from("Publishing from a separate task"),
                         ))
                         .await;
-                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
                 }
             });
 
             // Event handlers
             let read_future = tokio::spawn(async move {
-                while let Some(message) = conn.recv().await {
+                while let Some(message) = client.recv().await {
                     // println!("{message:?}");
                     let topic = message.topic();
                     let value = message.value().to_string();

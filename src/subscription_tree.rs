@@ -2,12 +2,13 @@ use std::clone::Clone;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use crate::config;
 use std::hash::Hash;
 use std::iter::Peekable;
 use std::str::Chars;
 use std::str::FromStr;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct Node<T: Clone + Eq + Hash> {
     token: Option<char>,
     children: HashMap<char, Node<T>>,
@@ -86,21 +87,29 @@ where
 
     /// Private, recursive function for getting all subscribers matching chars below start node
     fn collect_subscribers(
+        &self,
         mut chars: Peekable<Chars>,
         subscribers: &mut HashSet<T>,
         node: &Node<T>,
     ) {
-        let next = chars.next();
-
-        let wildcard = node.children.get(&char::from_str("*").unwrap());
-        if let Some(wildcard_node) = wildcard {
-            for item in wildcard_node.items.clone() {
-                subscribers.insert(item);
-            }
-            SubscriptionTree::collect_subscribers(chars.clone(), subscribers, wildcard_node);
+        let next: char;
+        match chars.next() {
+            Some(c) => next = c,
+            None => return,
         }
 
-        let next_node_opt = node.children.get(&next.unwrap());
+        // Ignore wildcards if system_prefix is specified
+        if !(node == &self.root && next == config::SYSTEM_TOPIC_PREFIX) {
+            let wildcard = node.children.get(&char::from_str("*").unwrap());
+            if let Some(wildcard_node) = wildcard {
+                for item in wildcard_node.items.clone() {
+                    subscribers.insert(item);
+                }
+                self.collect_subscribers(chars.clone(), subscribers, wildcard_node);
+            }
+        };
+
+        let next_node_opt = node.children.get(&next);
         match next_node_opt {
             Some(next_node) => {
                 if chars.peek().is_none() {
@@ -110,7 +119,7 @@ where
                     }
                     return;
                 }
-                SubscriptionTree::collect_subscribers(chars, subscribers, next_node)
+                self.collect_subscribers(chars, subscribers, next_node)
             }
             // Next character not in tree, no more subscriptions on this path
             None => return,
@@ -118,13 +127,12 @@ where
     }
 
     /// Return the full set of subscribers to a given topic
+    ///
+    /// Args
+    /// - topic: the topic to match
     pub fn get_subscribers(&self, topic: &str) -> HashSet<T> {
         let mut subscribers = HashSet::new();
-        SubscriptionTree::collect_subscribers(
-            topic.chars().peekable(),
-            &mut subscribers,
-            &self.root,
-        );
+        self.collect_subscribers(topic.chars().peekable(), &mut subscribers, &self.root);
         subscribers
     }
 
@@ -171,6 +179,7 @@ where
         }
     }
 
+    // Completely remove client from subscription tree
     pub fn unsubscribe_client(&mut self, id: &T) -> Result<(), &str> {
         match self.subscribers.get(id) {
             Some(client_subscriptions) => {
@@ -208,5 +217,10 @@ mod tests {
 
         st.unsubscribe_client(&&1).unwrap();
         assert!(st.get_subscribers("metrics") == HashSet::new());
+
+        st.subscribe("*", &1);
+        assert!(st.get_subscribers("!subscribers") == HashSet::new());
+        st.subscribe("!*", &1);
+        assert!(st.get_subscribers("!subscribers") == HashSet::from([&1]));
     }
 }

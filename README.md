@@ -23,8 +23,9 @@ Work in progress.
 ### Roadmap
 
 - Code cleanup, refactoring, etc
+- Runtime subscription changes (changing subscriptions in response to application events)
 - Benchmarking setup
-- Robust error handling
+- Robust error handling (retries & graceful failures)
 - Python bindings
 - TLS/SSL
 - Authentication
@@ -32,3 +33,5 @@ Work in progress.
 - Broker type
     - FIFO: maintains message ordering per connection
     - BURST: high throughput, concurrent message processing
+- Catch up / Exactly once level of service (making stream completeness reliable over spotty connection)
+- Extensible server class (e.g. custom routing / logging code)
