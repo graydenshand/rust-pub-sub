@@ -17,18 +17,12 @@ use crate::config;
 use crate::datagram::{Message, MessageReader, MessageWriter};
 use crate::subscription_tree::{self};
 
-#[derive(Debug, Clone)]
-struct Subscription {
-    addr: String,
-    pattern: String,
-}
-
 /// An async message passing application
 #[derive(Debug, Clone)]
 pub struct Server {
     /// Port on which to listen for new requests
     port: u16,
-    /// Structure containing information about clients subscribed to topics on this Server
+    ///  Client subscriptions on this server
     subscribers: Arc<Mutex<subscription_tree::SubscriptionTree<String>>>,
     /// Client channel map
     write_channel_map: Arc<Mutex<HashMap<String, mpsc::Sender<Message>>>>,
@@ -46,14 +40,13 @@ impl Server {
     async fn on_receive(&self, client_id: &String, m: Message) {
         let topic = m.topic();
         let value = m.value();
-        debug!("Message received - {client_id} - {topic} {value}");
         // Handle system messages
         if m.topic().starts_with(config::SYSTEM_TOPIC_PREFIX) {
             match m.topic().trim_start_matches(config::SYSTEM_TOPIC_PREFIX) {
                 config::SUBSCRIBE_TOPIC => {
                     // Message value contains subscription pattern
                     debug!(
-                        "New subscription request - {} - {}",
+                        "SUBSCRIBE - {} - {}",
                         client_id.to_string(),
                         &m.value().as_str().unwrap()
                     );
@@ -62,17 +55,16 @@ impl Server {
 
                     // Add new subscription entry to the subscriber tree
                     subscribers.subscribe(&m.value().as_str().unwrap(), client_id.to_string());
-
-                    // Broadcast only to system subscribers
                 }
                 _ => {
                     warn!("Message published to unrecognized system topic: {topic}");
                 }
             }
+        } else {
+            debug!("PUBLISH - {client_id} - {topic} {value}");
         };
 
         let subscribers = self.subscribers.lock().unwrap().get_subscribers(m.topic());
-        debug!("Broadcasting message to {} subscribers", subscribers.len());
         let write_channels = subscribers.iter().map(|client_id| {
             if let Some(tx) = self.write_channel_map.lock().unwrap().get(client_id) {
                 tx.clone()
@@ -107,12 +99,9 @@ impl Server {
                 let end = Instant::now();
                 let seconds = (end - start).as_millis() as f64 / 1000.0;
                 info!(
-                    "{} messages received in {}s - {} m/s",
-                    count,
-                    seconds,
+                    "DISCONNECT - {client_id} - {count} messages received in {seconds}s - {} m/s",
                     (count as f64 / seconds).round()
                 );
-                info!("Disconnected");
                 // Terminate loop
                 return;
             } else {
@@ -134,7 +123,7 @@ impl Server {
         loop {
             let (stream, _) = listener.accept().await?;
             let client_id = Uuid::new_v4();
-            info!("Connection made - client_id: {}", client_id.to_string());
+            info!("CONNECT - {}", client_id.to_string());
             let (r, w) = stream.into_split();
 
             let server_clone = self.clone();
@@ -156,10 +145,13 @@ impl Server {
             let tx2 = tx.clone();
             tokio::spawn(async move {
                 loop {
-                    tx2.send(Message::new("test", Value::from("Ping")))
-                        .await
-                        .ok();
-                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                    tx2.send(Message::new(
+                        &format!("{}{}", config::SYSTEM_TOPIC_PREFIX, config::HEALTH_TOPIC),
+                        Value::from("Ok"),
+                    ))
+                    .await
+                    .ok();
+                    tokio::time::sleep(Duration::from_secs(config::HEALTH_CHECK_INTERVAL_S)).await;
                 }
             });
         }

@@ -23,9 +23,11 @@ Work in progress.
 ### Roadmap
 
 - Code cleanup, refactoring, etc
-- Runtime subscription changes (changing subscriptions in response to application events)
-- Benchmarking setup
+- Extensible server class (e.g. custom handlers)
+- Unsubscribe function on client
 - Robust error handling (retries & graceful failures)
+    - Server disconnect, client retry logic
+- Benchmarking setup
 - Python bindings
 - TLS/SSL
 - Authentication
@@ -34,4 +36,4 @@ Work in progress.
     - FIFO: maintains message ordering per connection
     - BURST: high throughput, concurrent message processing
 - Catch up / Exactly once level of service (making stream completeness reliable over spotty connection)
-- Extensible server class (e.g. custom routing / logging code)
+

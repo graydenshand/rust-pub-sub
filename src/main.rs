@@ -73,6 +73,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("Running test client...");
             let mut client = Client::new(address.to_string()).await;
             client.subscribe("*").await;
+            client.subscribe("!health").await;
 
             let client_clone = client.clone();
             let write_future = tokio::spawn(async move {

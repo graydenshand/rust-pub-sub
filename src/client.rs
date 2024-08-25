@@ -1,16 +1,12 @@
 use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::TcpStream;
-// use uuid::Uuid;
 
 use crate::config;
 use crate::datagram::{Message, MessageReader, MessageWriter};
 use rmpv::Value;
-use std::collections::HashMap;
 
 use log::{debug, info};
 use tokio::sync::mpsc;
-
-// use rmpv::Value;
 
 use std::error::Error;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -64,20 +60,30 @@ impl Client {
         }
     }
 
+    /// Subscribe to messages on topics matching the specified pattern
+    ///
+    /// Patterns can contain glob style wildcards: `*``
+    ///
+    /// System messages are sent on topics starting with `!` (e.g. `!subscriptions`),
+    /// and are excluded in wildcard matches. To subscribe to all system messages,
+    /// create a new subscription with the following pattern: `!`
     pub async fn subscribe(&self, pattern: &str) {
         let topic = format!("{}{}", config::SYSTEM_TOPIC_PREFIX, config::SUBSCRIBE_TOPIC);
         self.publish(Message::new(&topic, Value::from(pattern)))
             .await;
     }
 
+    /// Create a new client
+    ///
+    /// Args:
+    /// - addr: The address (`host:port`) of a server to establish a connection with
     pub async fn new(addr: String) -> Client {
-        let (tx, rx) = mpsc::channel(config::CHANNEL_BUFFER_SIZE);
         let resp = TcpStream::connect(&addr).await;
         match resp {
             Ok(stream) => {
                 info!("Connected: {}", &addr);
                 let (r, w) = stream.into_split();
-
+                let (tx, rx) = mpsc::channel(config::CHANNEL_BUFFER_SIZE);
                 tokio::spawn(async move {
                     _ = Client::receive_loop(r, tx).await.unwrap();
                 });
