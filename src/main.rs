@@ -3,9 +3,10 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+use env_logger;
+use log::{debug, info};
 use std::error::Error;
 use tokio;
-
 
 mod client;
 mod datagram;
@@ -13,10 +14,9 @@ mod server;
 mod subscription_tree;
 use server::Server;
 
-use client::{Client};
+use client::Client;
 use datagram::Message;
-use rmpv::{Value};
-
+use rmpv::Value;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -56,9 +56,15 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let cli: Cli = Cli::parse();
+    let log_level = match cli.debug {
+        0 => "info",
+        _ => "debug",
+    };
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level)).init();
 
     match &cli.command {
         Some(Commands::Server { port }) => {
+            info!("Listening on 127.0.0.1:{port}");
             let mut server = Server::new(*port).await?;
             server.run().await?;
         }
@@ -67,23 +73,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let mut client = Client::new();
 
             // Connect to server at specified address
-            let mut channel = client
+            let mut conn = client
                 .connect(address.to_string(), vec![String::from("*")])
                 .await;
 
-            // Example: publish messages from separate tasks
-            let channel_clone = channel.clone();
+            let conn_clone = conn.clone();
             let write_future = tokio::spawn(async move {
                 loop {
-                    channel_clone.publish(Message::new("test", Value::from("Publishing from a separate task"))).await;
-                    // tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    conn_clone
+                        .publish(Message::new(
+                            "test",
+                            Value::from("Publishing from a separate task"),
+                        ))
+                        .await;
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 }
             });
 
-            // Event handler
+            // Event handlers
             let read_future = tokio::spawn(async move {
-                while let Some(message) = channel.recv().await {
+                while let Some(message) = conn.recv().await {
                     // println!("{message:?}");
+                    let topic = message.topic();
+                    let value = message.value().to_string();
+                    debug!("Message received - {topic} - {value}");
                 }
             });
 

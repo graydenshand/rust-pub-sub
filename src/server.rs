@@ -1,6 +1,7 @@
 use rmpv::Value;
 use std::collections::HashMap;
 
+use log::{debug, info};
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -44,20 +45,18 @@ impl Server {
 
     /// Process a message published by a client
     async fn on_receive(&self, client_id: &String, m: Message) {
-        // println!(
-        //     "{:?} Message received - {client_id} - {} - {}",
-        //     chrono::offset::Local::now(),
-        //     m.topic(),
-        //     m.value()
-        // );
+        let topic = m.topic();
+        let value = m.value();
+        debug!("Message received - {client_id} - {topic} {value}");
         // Handle system messages
         if m.topic().starts_with(SYSTEM_TOPIC_PREFIX) {
             match m.topic().trim_start_matches(SYSTEM_TOPIC_PREFIX) {
                 SUBSCRIBE_TOPIC => {
                     // Message value contains subscription pattern
-                    println!(
-                        "New subscription request: {:?}",
-                        (client_id.to_string(), &m.value().as_str().unwrap())
+                    debug!(
+                        "New subscription request - {} - {}",
+                        client_id.to_string(),
+                        &m.value().as_str().unwrap()
                     );
                     // Wait for ownership of mutex lock
                     let mut subscribers = self.subscribers.lock().unwrap();
@@ -70,10 +69,9 @@ impl Server {
         };
 
         let subscribers = self.subscribers.lock().unwrap().get_subscribers(m.topic());
-
+        debug!("Broadcasting message to {} subscribers", subscribers.len());
         let write_channels = subscribers.iter().map(|client_id| {
             if let Some(tx) = self.write_channel_map.lock().unwrap().get(client_id) {
-                // println!("Sending message to {client_id}");
                 tx.clone()
             } else {
                 panic!("Inconsistent state between subscribers and write_channel_map");
@@ -105,20 +103,20 @@ impl Server {
                 // Log stats about messages received from client
                 let end = Instant::now();
                 let seconds = (end - start).as_millis() as f64 / 1000.0;
-                println!(
+                info!(
                     "{} messages received in {}s - {} m/s",
                     count,
                     seconds,
                     (count as f64 / seconds).round()
                 );
-                println!("Disconnected");
+                info!("Disconnected");
                 // Terminate loop
                 return;
             } else {
-                // println!("{:?}", message?.unwrap());
                 let m: Message = message
                     .expect("message is Ok")
                     .expect("message is not None");
+                debug!("Message received - {} - {:?}", m.topic(), m.value());
 
                 // Processing messages asynchronously breaks the temporal ordering of messages, leave as synchronous for now
                 // tokio::spawn(Server::on_receive(Arc::clone(&subscribers), reader.client_id().to_string(), m));
@@ -136,7 +134,7 @@ impl Server {
         loop {
             let (stream, _) = listener.accept().await?;
             let client_id = Uuid::new_v4();
-            println!("Connection made");
+            info!("Connection made - client_id: {}", client_id.to_string());
             let (r, w) = stream.into_split();
 
             let server_clone = self.clone();

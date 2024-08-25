@@ -1,44 +1,34 @@
 # Project
 
-## Server
+A TCP Pub/Sub server & client, using msgpack.
 
-1. Listen for data from a socket
-2. Transform the data using multiple parallel threads
-3. Publish over a socket
+## Priorities
 
-## Architecture
-```
-SERVER (listner) <--> CLIENT (caller)
+- Performant
+    - Low latency of messages from publisher to subscriber
+    - High throughput (messages sent & received) of server & client
+    - Large network
+        - Many Producers
+        - Many Subscribers
+        - Many Subscriptions
+    - Efficient resource utilization (cpu & memory)
+- Usable
+    - Clear Interface
+    - Portable / Open
+    - Convenient
+## Status
 
-BIDIRECTIONAL PUB/SUB
-- Client can publish messages to server
-- Server can send messages to client based on subscriptions
+Work in progress.
 
+### Roadmap
 
-Server
-Client
-MessageReader: Owns read side of a TCP connection
-MessageWriter: Owns write side of a TCP connection
-
-ApplicataionClient
-ApplicationFunction
-
-
-Publish: Client --> ClientMessageWriter --> ServerMessageReader --> Server
-Message Received: Server --> ServerMessageWriter --> ClientMessageReader --> Client
-
-Client --(channel)--> ClientMessageWriter
-Client <--(channel)-- ClientMessageReader
-Server <--(channel)-- ServerMessageReader
-Server --(channel)--> ServerMessageWriter
-```
-
-
-
-Client should be able to:
-- Publish a message to a server
-- Subscribe to messages on a server matching a topic pattern, registering a function to execute every time a message matching that pattern is published.
-- Publish a message to a server from a subscription handler
-
-- Client may be publishing to the same, or different servers than it's subscribed to
-
+- Code cleanup, refactoring, etc
+- Benchmarking setup
+- Robust error handling
+- Python bindings
+- TLS/SSL
+- Authentication
+- Higher test coverage
+- Broker type
+    - FIFO: maintains message ordering per connection
+    - BURST: high throughput, concurrent message processing

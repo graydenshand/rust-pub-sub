@@ -5,21 +5,18 @@ use tokio::net::TcpStream;
 use crate::datagram::{
     Message, MessageReader, MessageWriter, SUBSCRIBE_TOPIC, SYSTEM_TOPIC_PREFIX,
 };
-use rmpv::{Value};
+use rmpv::Value;
 use std::collections::HashMap;
 
+use log::{debug, info};
 use tokio::sync::mpsc;
-
 
 // use rmpv::Value;
 
 use std::error::Error;
 use tokio::sync::mpsc::{Receiver, Sender};
 
-
 use tokio;
-
-
 
 #[derive(Debug, Clone)]
 pub struct Subscription {
@@ -135,7 +132,7 @@ impl Client {
         let resp = TcpStream::connect(&addr).await;
         match resp {
             Ok(stream) => {
-                println!("Connected: {}", &addr);
+                info!("Connected: {}", &addr);
                 let (r, w) = stream.into_split();
 
                 tokio::spawn(async move {
@@ -154,7 +151,6 @@ impl Client {
                 // w.unwrap();
                 let subs = subscriptions.clone();
                 for s in subs {
-                    // println!("Subscribe: {}", s);
                     let topic = format!("{}{}", SYSTEM_TOPIC_PREFIX, SUBSCRIBE_TOPIC);
                     wtx.send(Message::new(&topic, Value::from(s)))
                         .await
@@ -191,7 +187,6 @@ impl Client {
         // writer.send(Message::new("!system/client-id-registration", Value::String(Utf8String::from(self.id.clone()))));
 
         for message in stream {
-            // println!("Sending message {message:?}");
             writer.send(message).await.unwrap();
         }
     }
