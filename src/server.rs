@@ -37,24 +37,24 @@ impl Server {
     }
 
     /// Process a message published by a client
-    async fn on_receive(&self, client_id: &String, m: Message) {
-        let topic = m.topic();
-        let value = m.value();
+    async fn on_receive(&self, client_id: &String, message: Message) {
+        let topic = message.topic();
+        let value = message.value();
         // Handle system messages
-        if m.topic().starts_with(config::SYSTEM_TOPIC_PREFIX) {
-            match m.topic().trim_start_matches(config::SYSTEM_TOPIC_PREFIX) {
+        if message.topic().starts_with(config::SYSTEM_TOPIC_PREFIX) {
+            match message.topic().trim_start_matches(config::SYSTEM_TOPIC_PREFIX) {
                 config::SUBSCRIBE_TOPIC => {
                     // Message value contains subscription pattern
                     debug!(
                         "SUBSCRIBE - {} - {}",
                         client_id.to_string(),
-                        &m.value().as_str().unwrap()
+                        &message.value().as_str().unwrap()
                     );
                     // Wait for ownership of mutex lock
                     let mut subscribers = self.subscribers.lock().unwrap();
 
                     // Add new subscription entry to the subscriber tree
-                    subscribers.subscribe(&m.value().as_str().unwrap(), client_id.to_string());
+                    subscribers.subscribe(&message.value().as_str().unwrap(), client_id.to_string());
                 }
                 _ => {
                     warn!("Message published to unrecognized system topic: {topic}");
@@ -64,7 +64,7 @@ impl Server {
             debug!("PUBLISH - {client_id} - {topic} {value}");
         };
 
-        let subscribers = self.subscribers.lock().unwrap().get_subscribers(m.topic());
+        let subscribers = self.subscribers.lock().unwrap().get_subscribers(message.topic());
         let write_channels = subscribers.iter().map(|client_id| {
             if let Some(tx) = self.write_channel_map.lock().unwrap().get(client_id) {
                 tx.clone()
@@ -74,7 +74,7 @@ impl Server {
         });
 
         for tx in write_channels {
-            tx.send(m.clone()).await.ok();
+            tx.send(message.clone()).await.ok();
         }
     }
 
