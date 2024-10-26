@@ -41,7 +41,9 @@ impl Client {
     async fn optional_timeout(duration: Option<tokio::time::Duration>) {
         match duration {
             Some(d) => tokio::time::sleep(d).await,
-            None => loop {},
+            None => loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await
+            },
         }
     }
 
@@ -53,10 +55,10 @@ impl Client {
         if self.rx.is_some() {
             tokio::select! {
                 message = self.rx.as_mut().unwrap().recv() => {
-                    return Some(message.expect("Message can be decoded"))
+                    Some(message.expect("Message can be decoded"))
                 },
                 _ = Self::optional_timeout(timeout) => {
-                    return None
+                    None
                 }
 
             }
