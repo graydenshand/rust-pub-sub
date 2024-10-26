@@ -90,7 +90,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             // Event handlers
             let read_future = tokio::spawn(async move {
-                while let Some(message) = client.recv().await {
+                while let Some(message) = client.recv(None).await {
                     // println!("{message:?}");
                     let topic = message.topic();
                     let value = message.value().to_string();

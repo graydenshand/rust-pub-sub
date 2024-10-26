@@ -42,7 +42,10 @@ impl Server {
         let value = message.value();
         // Handle system messages
         if message.topic().starts_with(config::SYSTEM_TOPIC_PREFIX) {
-            match message.topic().trim_start_matches(config::SYSTEM_TOPIC_PREFIX) {
+            match message
+                .topic()
+                .trim_start_matches(config::SYSTEM_TOPIC_PREFIX)
+            {
                 config::SUBSCRIBE_TOPIC => {
                     // Message value contains subscription pattern
                     debug!(
@@ -54,7 +57,8 @@ impl Server {
                     let mut subscribers = self.subscribers.lock().unwrap();
 
                     // Add new subscription entry to the subscriber tree
-                    subscribers.subscribe(&message.value().as_str().unwrap(), client_id.to_string());
+                    subscribers
+                        .subscribe(&message.value().as_str().unwrap(), client_id.to_string());
                 }
                 _ => {
                     warn!("Message published to unrecognized system topic: {topic}");
@@ -64,7 +68,11 @@ impl Server {
             debug!("PUBLISH - {client_id} - {topic} {value}");
         };
 
-        let subscribers = self.subscribers.lock().unwrap().get_subscribers(message.topic());
+        let subscribers = self
+            .subscribers
+            .lock()
+            .unwrap()
+            .get_subscribers(message.topic());
         let write_channels = subscribers.iter().map(|client_id| {
             if let Some(tx) = self.write_channel_map.lock().unwrap().get(client_id) {
                 tx.clone()
@@ -142,18 +150,18 @@ impl Server {
                 writer.subscribe_to_channel(rx).await.ok();
             });
 
-            let tx2 = tx.clone();
-            tokio::spawn(async move {
-                loop {
-                    tx2.send(Message::new(
-                        &format!("{}{}", config::SYSTEM_TOPIC_PREFIX, config::HEALTH_TOPIC),
-                        Value::from("Ok"),
-                    ))
-                    .await
-                    .ok();
-                    tokio::time::sleep(Duration::from_secs(config::HEALTH_CHECK_INTERVAL_S)).await;
-                }
-            });
+            // let tx2 = tx.clone();
+            // tokio::spawn(async move {
+            //     loop {
+            //         tx2.send(Message::new(
+            //             &format!("{}{}", config::SYSTEM_TOPIC_PREFIX, config::HEALTH_TOPIC),
+            //             Value::from("Ok"),
+            //         ))
+            //         .await
+            //         .ok();
+            //         tokio::time::sleep(Duration::from_secs(config::HEALTH_CHECK_INTERVAL_S)).await;
+            //     }
+            // });
         }
     }
 }

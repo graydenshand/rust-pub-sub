@@ -34,12 +34,32 @@ impl Client {
         self.tx.send(message).await.expect("Message was sent")
     }
 
+    /// Handy util for timing out an opteration that would otherwise block forever
+    ///
+    /// Used with tokio::select! macro, this can interrupt a process after a set
+    /// duration. If no timeout is set, it will run forever.
+    async fn optional_timeout(duration: Option<tokio::time::Duration>) {
+        match duration {
+            Some(d) => tokio::time::sleep(d).await,
+            None => loop {},
+        }
+    }
+
     /// Receive a message from the server
     ///
-    /// Returns a Message, or None when the connection has closed
-    pub async fn recv(&mut self) -> Option<Message> {
+    /// Returns a Message, or None when the connection has closed or timeout has
+    /// been reached
+    pub async fn recv(&mut self, timeout: Option<tokio::time::Duration>) -> Option<Message> {
         if self.rx.is_some() {
-            self.rx.as_mut().unwrap().recv().await
+            tokio::select! {
+                message = self.rx.as_mut().unwrap().recv() => {
+                    return Some(message.expect("Message can be decoded"))
+                },
+                _ = Self::optional_timeout(timeout) => {
+                    return None
+                }
+
+            }
         } else {
             panic!("Cannot call recv on a clone")
         }

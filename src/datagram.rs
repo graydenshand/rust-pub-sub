@@ -12,7 +12,7 @@ use tokio;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::mpsc::Receiver;
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Message {
     topic: String,
     value: Value,
@@ -50,7 +50,9 @@ impl MessageReader {
         }
     }
 
-    /// Parse a MessagePack Value from buffer
+    /// Read a Message from buffer
+    ///
+    /// Returns a tuple containing the Message and the number of bytes read
     fn parse_value(&mut self) -> (Option<Message>, usize) {
         let buf = &mut &self.buffer[..];
         let start_len = buf.len();

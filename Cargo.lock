@@ -1001,7 +1001,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-lab-sockets-threads"
+name = "rps"
 version = "0.1.0"
 dependencies = [
  "bytes",

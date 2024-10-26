@@ -3,7 +3,6 @@
 title: Pub sub
 ---
 classDiagram
-    note "[e] : External class"
     class Message {
         -topic
         -value
