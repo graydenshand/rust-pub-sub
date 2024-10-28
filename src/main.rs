@@ -8,16 +8,9 @@ use log::{debug, info};
 use std::error::Error;
 use tokio;
 
-mod client;
-mod config;
-mod datagram;
-mod server;
-mod subscription_tree;
-use server::Server;
-
-use client::Client;
-use datagram::Message;
 use rmpv::Value;
+use rps::client::Client;
+use rps::server::Server;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -51,6 +44,10 @@ enum Commands {
         /// address to send messages to
         #[arg(short, long)]
         address: String,
+
+        /// client_id server will use to trace this session
+        #[arg(short, long, default_value_t = String::from("test-client"))]
+        client_id: String,
     },
 }
 
@@ -65,24 +62,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     match &cli.command {
         Some(Commands::Server { port }) => {
-            info!("Listening on 127.0.0.1:{port}");
+            info!("Listening on port {port}");
             let mut server = Server::new(*port).await?;
             server.run().await?;
         }
-        Some(Commands::TestClient { address }) => {
-            println!("Running test client...");
-            let mut client = Client::new(address.to_string()).await;
+        Some(Commands::TestClient { address, client_id }) => {
+            info!("Running test client...");
+            let mut client = Client::new(address.to_string(), client_id.to_string()).await;
             client.subscribe("*").await;
-            client.subscribe("!health").await;
 
             let client_clone = client.clone();
             let write_future = tokio::spawn(async move {
                 loop {
                     client_clone
-                        .publish(Message::new(
-                            "test",
-                            Value::from("Publishing from a separate task"),
-                        ))
+                        .publish("test", Value::from("Publishing from a separate task"))
                         .await;
                     tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
                 }

@@ -7,21 +7,21 @@ use std::error::Error;
 
 use bytes::{Buf, BytesMut};
 
-use crate::config;
-use tokio;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::sync::mpsc::Receiver;
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Message {
     topic: String,
     value: Value,
+    client_id: String,
 }
 impl Message {
-    pub fn new(topic: &str, value: Value) -> Message {
+    pub fn new(topic: &str, value: Value, client_id: &str) -> Message {
         Message {
             topic: String::from(topic),
             value,
+            client_id: String::from(client_id),
         }
     }
 
@@ -33,6 +33,11 @@ impl Message {
     /// Get the value
     pub fn value(&self) -> &Value {
         &self.value
+    }
+
+    /// Get the client_id
+    pub fn client_id(&self) -> &str {
+        &self.client_id
     }
 }
 
@@ -93,6 +98,28 @@ impl MessageReader {
             }
         }
     }
+
+    /// Bind a function to this stream, invoke for every message received.
+    ///
+    /// Returns the return value of the last function invocation
+    pub async fn bind<F>(&mut self, mut handler: F) -> Result<(), Box<dyn Error>>
+    where
+        F: FnMut(Message),
+    {
+        loop {
+            let message = self.read_value().await.ok();
+            if message.is_none() || message.as_ref().unwrap().is_none() {
+                // Terminate loop
+                return Ok(());
+            } else {
+                let m: Message = message
+                    .expect("message is Ok")
+                    .expect("message is not None");
+
+                handler(m);
+            }
+        }
+    }
 }
 
 /// Write half of a connection
@@ -110,17 +137,6 @@ impl MessageWriter {
         let mut buf = Vec::new();
         message.serialize(&mut Serializer::new(&mut buf)).unwrap();
         self.stream.write(&mut buf).await?;
-        Ok(())
-    }
-
-    // Listen for messages over async channel and forward over this connection
-    pub async fn subscribe_to_channel(
-        &mut self,
-        mut rx: Receiver<Message>,
-    ) -> Result<(), Box<dyn Error>> {
-        while let Some(message) = rx.recv().await {
-            self.send(message).await?
-        }
         Ok(())
     }
 }

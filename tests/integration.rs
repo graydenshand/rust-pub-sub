@@ -7,9 +7,9 @@ async fn it_publishes_and_receives_messages() {
     // Define variables
     let port = 36912;
     let messages = vec![
-        rps::datagram::Message::new("test", Value::from("test")),
-        rps::datagram::Message::new("test", Value::from(0.001)),
-        rps::datagram::Message::new("test", Value::from(true)),
+        ("test", Value::from("test")),
+        ("test", Value::from(0.001)),
+        ("test", Value::from(true)),
     ];
 
     // Start server
@@ -22,7 +22,7 @@ async fn it_publishes_and_receives_messages() {
 
     // Give server 500ms to start, then initialize a client
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-    let mut client = rps::client::Client::new(format!("127.0.0.1:{port}")).await;
+    let mut client = rps::client::Client::new(format!("127.0.0.1:{port}"), "test".into()).await;
 
     // Subscribe to all messages
     client.subscribe("*").await;
@@ -50,13 +50,21 @@ async fn it_publishes_and_receives_messages() {
 
     // Publish each of the messages defined above
     let messages_clone = messages.clone();
-    for message in messages_clone {
-        client_clone.publish(message).await;
+    for (topic, value) in messages_clone {
+        client_clone.publish(topic, value).await;
     }
 
     // Wait for spawned task to complete
     let received_messages = read_future.await.unwrap();
 
     // Verify messages received matches messages sent
-    assert_eq!(messages, received_messages);
+    for i in 0..messages.len() {
+        assert_eq!(
+            messages[i],
+            (
+                received_messages[i].topic(),
+                received_messages[i].value().to_owned()
+            )
+        );
+    }
 }

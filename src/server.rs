@@ -1,148 +1,238 @@
-use rmpv::Value;
-use std::collections::HashMap;
-
 use log::{debug, info, warn};
 use std::error::Error;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 use tokio;
-use tokio::sync::mpsc;
+use tokio::sync::broadcast;
 
-use tokio::net::tcp::OwnedReadHalf;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpListener;
+use tokio::time::Instant;
 
-use crate::config;
+use crate::config::{self, SYSTEM_TOPIC_PREFIX};
 use crate::datagram::{Message, MessageReader, MessageWriter};
-use crate::subscription_tree::{self};
+use crate::glob_tree::{self};
+
+#[derive(Debug)]
+struct Channel {
+    tx: broadcast::Sender<Message>,
+    rx: broadcast::Receiver<Message>,
+}
+impl Channel {
+    fn new(capacity: usize) -> Self {
+        let (tx, rx) = broadcast::channel(capacity);
+        Self { tx, rx }
+    }
+}
+impl Clone for Channel {
+    fn clone(&self) -> Self {
+        Self {
+            tx: self.tx.clone(),
+            rx: self.tx.subscribe(),
+        }
+    }
+}
+
+enum Command {
+    /// Publish a message
+    Publish,
+    /// Subscribe to a topic
+    Subscribe,
+    /// Set client id of current session
+    SetClientId,
+}
+impl Command {
+    fn from_topic(topic: &str) -> Result<Command, Box<dyn Error>> {
+        if !topic.starts_with(config::SYSTEM_TOPIC_PREFIX) {
+            return Ok(Command::Publish);
+        };
+        match topic.trim_start_matches(config::SYSTEM_TOPIC_PREFIX) {
+            config::SUBSCRIBE_TOPIC => Ok(Command::Subscribe),
+            config::SET_CLIENT_ID_TOPIC => Ok(Command::SetClientId),
+            _ => Err("Unrecognized system topic".into()),
+        }
+    }
+
+    /// Hook that runs when the message is initially received from the client
+    fn on_receive(command: &Command, message: &Message, client_id: &mut String) -> () {
+        match command {
+            Command::Publish => {
+                debug!(
+                    "{} - PUBLISH - {} {}",
+                    client_id,
+                    message.topic(),
+                    message.value()
+                );
+            }
+            Command::Subscribe => {
+                debug!(
+                    "{} - SUBSCRIBE - {}",
+                    client_id,
+                    message.value().as_str().unwrap()
+                );
+            }
+            Command::SetClientId => {
+                debug!(
+                    "{} - SET CLIENT ID - {}",
+                    client_id,
+                    message.value().as_str().unwrap()
+                );
+                *client_id = message.value().as_str().unwrap().to_string();
+            }
+        }
+    }
+}
+
+struct MessageProcessor {
+    subscriptions: glob_tree::GlobTree,
+    writer: MessageWriter,
+    client_id: Arc<Mutex<String>>,
+}
+impl MessageProcessor {
+    fn new(stream: OwnedWriteHalf, client_id: Arc<Mutex<String>>) -> Self {
+        Self {
+            subscriptions: glob_tree::GlobTree::new(),
+            writer: MessageWriter::new(stream),
+            client_id,
+        }
+    }
+
+    /// Process a message
+    ///
+    /// Returns true if the message should get sent over connection
+    async fn process_message(&mut self, message: &Message) -> bool {
+        let command = Command::from_topic(message.topic());
+        if command.is_ok() {
+            match command.unwrap() {
+                Command::Subscribe if message.client_id() == *self.client_id.lock().unwrap() => {
+                    self.subscriptions
+                        .insert(&message.value().as_str().unwrap());
+                }
+                _ => (),
+            }
+        } else {
+            panic!("{}", command.err().unwrap())
+        }
+        // Return message if not a system message and in subscriptions tree
+        self.subscriptions.check(message.topic())
+            && !message.topic().starts_with(config::SYSTEM_TOPIC_PREFIX)
+    }
+
+    /// Listen for messages over async channel, apply a filter, and forward over this connection
+    pub async fn bind_to_channel(
+        &mut self,
+        mut rx: broadcast::Receiver<Message>,
+    ) -> Result<(), Box<dyn Error>> {
+        while let Some(message) = rx.recv().await.ok() {
+            if self.process_message(&message).await {
+                self.writer.send(message).await?
+            }
+        }
+        Ok(())
+    }
+}
+
+struct Connection {
+    client_id: Arc<Mutex<String>>,
+}
+impl Connection {
+    fn open(stream: tokio::net::TcpStream, channel: Channel) {
+        let client_id = Arc::new(Mutex::new(Uuid::new_v4().to_string()));
+        info!("{} - CONNECT", client_id.lock().unwrap());
+
+        // Split read and write halves of stream
+        let (r, w) = stream.into_split();
+
+        // Launch the loop that listens for messages from this client
+        let tx = channel.tx.clone();
+        let client_id_clone = client_id.clone();
+        tokio::spawn(async {
+            Connection::recv(r, tx, client_id_clone).await;
+        });
+
+        // Launch the loop that listens for messages from other clients
+        let rx = channel.tx.subscribe();
+        tokio::spawn(async {
+            Connection::send(w, rx, client_id).await;
+        });
+    }
+
+    /// Receive messages from client and broadcast to rest of system
+    async fn recv(
+        stream: OwnedReadHalf,
+        tx: broadcast::Sender<Message>,
+        mut client_id: Arc<Mutex<String>>,
+    ) {
+        let mut reader = MessageReader::new(stream);
+        reader
+            .bind(|m| {
+                match Command::from_topic(m.topic()) {
+                    Ok(command) => match command {
+                        Command::Publish => {
+                            debug!(
+                                "{} - PUBLISH - {} {}",
+                                client_id.lock().unwrap(),
+                                m.topic(),
+                                m.value()
+                            );
+                        }
+                        Command::Subscribe => {
+                            debug!(
+                                "{} - SUBSCRIBE - {}",
+                                client_id.lock().unwrap(),
+                                m.value().as_str().unwrap()
+                            );
+                        }
+                        Command::SetClientId => {
+                            debug!(
+                                "{} - SET CLIENT ID - {}",
+                                client_id.lock().unwrap(),
+                                m.value().as_str().unwrap()
+                            );
+                            *client_id.lock().unwrap() = m.value().as_str().unwrap().to_string();
+                        }
+                    },
+                    Err(e) => {
+                        warn!("{}", e);
+                    }
+                }
+                tx.send(m).unwrap();
+            })
+            .await
+            .unwrap();
+        info!("{} - DISCONNECT", client_id.lock().unwrap());
+    }
+
+    /// Bind a MessageProcessor to the broadcast channel and listen for messages
+    async fn send(
+        stream: OwnedWriteHalf,
+        rx: broadcast::Receiver<Message>,
+        client_id: Arc<Mutex<String>>,
+    ) {
+        tokio::spawn(async {
+            let mut message_processor: MessageProcessor = MessageProcessor::new(stream, client_id);
+            message_processor.bind_to_channel(rx).await.ok();
+        });
+    }
+}
 
 /// An async message passing application
 #[derive(Debug, Clone)]
 pub struct Server {
     /// Port on which to listen for new requests
     port: u16,
-    ///  Client subscriptions on this server
-    subscribers: Arc<Mutex<subscription_tree::SubscriptionTree<String>>>,
-    /// Client channel map
-    write_channel_map: Arc<Mutex<HashMap<String, mpsc::Sender<Message>>>>,
+    ///  Broadcast communication channel for all connection tasks
+    channel: Channel,
 }
 impl Server {
     /// Create a new server
     pub async fn new(port: u16) -> Result<Server, Box<dyn Error>> {
         Ok(Server {
             port,
-            subscribers: Arc::new(Mutex::new(subscription_tree::SubscriptionTree::new())),
-            write_channel_map: Arc::new(Mutex::new(HashMap::new())),
+            channel: Channel::new(config::CHANNEL_BUFFER_SIZE),
         })
     }
-
-    /// Publish a message from the server
-    pub async fn publish(&self, message: Message) {
-        self.on_receive(&String::from("server"), message).await
-    }
-    
-    /// Process system messages
-    fn handle_system_message(&self, message: &Message, client_id: &String) {
-        match message
-            .topic()
-            .trim_start_matches(config::SYSTEM_TOPIC_PREFIX)
-        {
-            config::SUBSCRIBE_TOPIC => {
-                // Message value contains subscription pattern
-                debug!(
-                    "SUBSCRIBE - {} - {}",
-                    client_id.to_string(),
-                    &message.value().as_str().unwrap()
-                );
-                // Wait for ownership of mutex lock
-                let mut subscribers = self.subscribers.lock().unwrap();
-
-                // Add new subscription entry to the subscriber tree
-                subscribers
-                    .subscribe(&message.value().as_str().unwrap(), client_id.to_string());
-            },
-            config::HEALTH_TOPIC => {
-                // No Op
-            }
-            _ => {
-                warn!("Message published to unrecognized system topic: {}", message.topic());
-            }
-        }
-    }
-
-    /// Process a message published by a client
-    async fn on_receive(&self, client_id: &String, message: Message) {
-        let topic = message.topic();
-        let value = message.value();
-        
-        // Handle system messages
-        if message.topic().starts_with(config::SYSTEM_TOPIC_PREFIX) {
-            self.handle_system_message(&message, client_id);
-        } else {
-            debug!("PUBLISH - {client_id} - {topic} {value}");
-        };
-
-        // Get set of clients subscribed to this topic
-        let subscribers = self
-            .subscribers
-            .lock()
-            .unwrap()
-            .get_subscribers(message.topic());
-
-        // From subscribed clients, get list of their corresponding write channels
-        let write_channels = subscribers.iter().map(|client_id| {
-            if let Some(tx) = self.write_channel_map.lock().unwrap().get(client_id) {
-                tx.clone()
-            } else {
-                panic!("Inconsistent state between subscribers and write_channel_map");
-            }
-        });
-
-        // Write message to every channel
-        for tx in write_channels {
-            tx.send(message.clone()).await.ok();
-        }
-    }
-
-    /// Maintain connection with a client and handle published messages
-    pub async fn receive_loop(&self, client_id: String, stream: OwnedReadHalf) -> () {
-        let mut reader = MessageReader::new(stream);
-        let start = Instant::now();
-
-        let mut count = 0;
-
-        loop {
-            let message = reader.read_value().await.ok();
-            if message.is_none() || message.as_ref().unwrap().is_none() {
-                // Unsubscribe client from all topics
-                let _ = self
-                    .subscribers
-                    .lock()
-                    .unwrap()
-                    .unsubscribe_client(&client_id);
-
-                // Log stats about messages received from client
-                let end = Instant::now();
-                let seconds = (end - start).as_millis() as f64 / 1000.0;
-                info!(
-                    "DISCONNECT - {client_id} - {count} messages received in {seconds}s - {} m/s",
-                    (count as f64 / seconds).round()
-                );
-                // Terminate loop
-                return;
-            } else {
-                let m: Message = message
-                    .expect("message is Ok")
-                    .expect("message is not None");
-
-                self.on_receive(&client_id, m).await;
-            }
-
-            count += 1;
-        }
-    }
-
 
     /// Listen for incoming connections
     pub async fn run(&mut self) -> Result<(), Box<dyn Error>> {
@@ -152,36 +242,7 @@ impl Server {
             // Accept a new connection
             let (stream, _) = listener.accept().await?;
 
-            // Assign a client id to this connection
-            let client_id = Uuid::new_v4();
-            info!("CONNECT - {}", client_id.to_string());
-
-            // Split read and write halves of stream
-            let (r, w) = stream.into_split();
-
-            // Launch the receive_loop that listens for messages from this client
-            let server_clone = self.clone();
-            tokio::spawn(async move {
-                _ = server_clone.receive_loop(client_id.to_string(), r).await;
-            });
-            
-            // Create a MessageWriter for sending messages to this client
-            let mut writer = MessageWriter::new(w);
-
-            // Create a new async channel that will be used to communicate with the MessageWriter from different tasks
-            let (tx, rx) = mpsc::channel(config::CHANNEL_BUFFER_SIZE);
-
-            // Add this channel to the global write_channel_map so other connections can write to it
-            let tx1 = tx.clone();
-            self.write_channel_map
-                .lock()
-                .unwrap()
-                .insert(client_id.to_string(), tx1);
-            
-            // Bind the MessageWriter to this channel and listen for messages
-            tokio::spawn(async move {
-                writer.subscribe_to_channel(rx).await.ok();
-            });            
+            Connection::open(stream, self.channel.clone());
         }
     }
 }
