@@ -8,15 +8,9 @@ use log::{debug, info};
 use std::error::Error;
 use tokio;
 
-mod client;
-mod config;
-mod datagram;
-mod server;
-mod subscription_tree;
-use server::Server;
-
-use client::Client;
-use datagram::Message;
+use rps::server::Server;
+use rps::client::Client;
+use rps::datagram::Message;
 use rmpv::Value;
 
 #[derive(Parser)]

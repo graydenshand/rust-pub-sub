@@ -11,7 +11,12 @@ use crate::config;
 use tokio;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::sync::mpsc::Receiver;
+// use tokio::sync::mpsc::Receiver;
+use tokio::sync::broadcast::{Sender, Receiver};
+use tokio::time::Instant;
+use log::info;
+use std::future::Future;
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Message {
     topic: String,
@@ -93,6 +98,39 @@ impl MessageReader {
             }
         }
     }
+
+    // Listen for messages over connection and forward over this connection
+    pub async fn subscribe_to_channel(
+        &mut self,
+        tx: Sender<Message>,
+    ) -> Result<(), Box<dyn Error>> {
+        let start = Instant::now();
+
+        let mut count = 0;
+
+        loop {
+            let message = self.read_value().await.ok();
+            if message.is_none() || message.as_ref().unwrap().is_none() {
+                // Log stats about messages received from client
+                let end = Instant::now();
+                let seconds = (end - start).as_millis() as f64 / 1000.0;
+                info!(
+                    "DISCONNECT - {count} messages received in {seconds}s - {} m/s",
+                    (count as f64 / seconds).round()
+                );
+                // Terminate loop
+                return Ok(());
+            } else {
+                let m: Message = message
+                    .expect("message is Ok")
+                    .expect("message is not None");
+                // broadcast message
+                tx.send(m).expect("Message is sent");
+            }
+
+            count += 1;
+        }
+    }
 }
 
 /// Write half of a connection
@@ -110,17 +148,6 @@ impl MessageWriter {
         let mut buf = Vec::new();
         message.serialize(&mut Serializer::new(&mut buf)).unwrap();
         self.stream.write(&mut buf).await?;
-        Ok(())
-    }
-
-    // Listen for messages over async channel and forward over this connection
-    pub async fn subscribe_to_channel(
-        &mut self,
-        mut rx: Receiver<Message>,
-    ) -> Result<(), Box<dyn Error>> {
-        while let Some(message) = rx.recv().await {
-            self.send(message).await?
-        }
         Ok(())
     }
 }

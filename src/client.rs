@@ -111,9 +111,9 @@ impl Client {
                 });
                 let (wtx, wrx) = mpsc::channel(config::CHANNEL_BUFFER_SIZE);
                 let mut writer = MessageWriter::new(w);
-                tokio::spawn(async move {
-                    writer.subscribe_to_channel(wrx).await.ok();
-                });
+                // tokio::spawn(async move {
+                //     writer.subscribe_to_channel(wrx).await.ok();
+                // });
                 Client {
                     tx: wtx,
                     rx: Some(rx),
