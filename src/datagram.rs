@@ -21,12 +21,14 @@ use std::future::Future;
 pub struct Message {
     topic: String,
     value: Value,
+    client_id: String,
 }
 impl Message {
-    pub fn new(topic: &str, value: Value) -> Message {
+    pub fn new(topic: &str, value: Value, client_id: &str) -> Message {
         Message {
             topic: String::from(topic),
             value,
+            client_id: String::from(client_id)
         }
     }
 
@@ -38,6 +40,11 @@ impl Message {
     /// Get the value
     pub fn value(&self) -> &Value {
         &self.value
+    }
+
+    /// Get the client_id
+    pub fn client_id(&self) -> &str {
+        &self.client_id
     }
 }
 
@@ -99,36 +106,25 @@ impl MessageReader {
         }
     }
 
-    // Listen for messages over connection and forward over this connection
-    pub async fn subscribe_to_channel(
+    /// Bind a function to this stream, invoke for every message received.
+    /// 
+    /// Returns the return value of the last function invocation
+    pub async fn bind<F>(
         &mut self,
-        tx: Sender<Message>,
-    ) -> Result<(), Box<dyn Error>> {
-        let start = Instant::now();
-
-        let mut count = 0;
-
+        mut handler: F,
+    ) -> Result<(), Box<dyn Error>> where F: FnMut(Message) {
         loop {
             let message = self.read_value().await.ok();
             if message.is_none() || message.as_ref().unwrap().is_none() {
-                // Log stats about messages received from client
-                let end = Instant::now();
-                let seconds = (end - start).as_millis() as f64 / 1000.0;
-                info!(
-                    "DISCONNECT - {count} messages received in {seconds}s - {} m/s",
-                    (count as f64 / seconds).round()
-                );
                 // Terminate loop
                 return Ok(());
             } else {
                 let m: Message = message
                     .expect("message is Ok")
                     .expect("message is not None");
-                // broadcast message
-                tx.send(m).expect("Message is sent");
+                
+                handler(m);
             }
-
-            count += 1;
         }
     }
 }

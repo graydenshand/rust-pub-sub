@@ -18,19 +18,23 @@ pub struct Client {
     tx: Sender<Message>,
     rx: Option<Receiver<Message>>,
     addr: String,
+    client_id: String,
 }
 impl Clone for Client {
     fn clone(&self) -> Self {
         Client {
             tx: self.tx.clone(),
-            rx: None, // only one owner of rx allowed, don't clone
+            rx: None, // only one copy of receiver allowed, don't clone
             addr: self.addr.clone(),
+            client_id: self.client_id.clone(),
         }
     }
 }
 impl Client {
     /// Publish a message to the server
-    pub async fn publish(&self, message: Message) {
+    pub async fn publish(&self, topic: &str, value: Value) {
+        // debug!("Publish {} {}", topic, value);
+        let message = Message::new(topic, value, &self.client_id);
         self.tx.send(message).await.expect("Message was sent")
     }
 
@@ -91,7 +95,13 @@ impl Client {
     /// create a new subscription with the following pattern: `!`
     pub async fn subscribe(&self, pattern: &str) {
         let topic = format!("{}{}", config::SYSTEM_TOPIC_PREFIX, config::SUBSCRIBE_TOPIC);
-        self.publish(Message::new(&topic, Value::from(pattern)))
+        self.publish(&topic, Value::from(pattern))
+            .await;
+    }
+
+    async fn set_client_id(&self) {
+        let topic = format!("{}{}", config::SYSTEM_TOPIC_PREFIX, config::SET_CLIENT_ID_TOPIC);
+        self.publish(&topic, Value::from(self.client_id.clone()))
             .await;
     }
 
@@ -99,7 +109,8 @@ impl Client {
     ///
     /// Args:
     /// - addr: The address (`host:port`) of a server to establish a connection with
-    pub async fn new(addr: String) -> Client {
+    /// - client_id: A unique identifier for this connection
+    pub async fn new(addr: String, client_id: String) -> Client {
         let resp = TcpStream::connect(&addr).await;
         match resp {
             Ok(stream) => {
@@ -109,16 +120,21 @@ impl Client {
                 tokio::spawn(async move {
                     _ = Client::receive_loop(r, tx).await.unwrap();
                 });
-                let (wtx, wrx) = mpsc::channel(config::CHANNEL_BUFFER_SIZE);
+                let (wtx, mut wrx) = mpsc::channel(config::CHANNEL_BUFFER_SIZE);
                 let mut writer = MessageWriter::new(w);
-                // tokio::spawn(async move {
-                //     writer.subscribe_to_channel(wrx).await.ok();
-                // });
-                Client {
+                tokio::spawn(async move {
+                    while let Some(message) = wrx.recv().await {
+                        writer.send(message).await.unwrap();
+                    }
+                });
+                let client = Client {
                     tx: wtx,
                     rx: Some(rx),
                     addr,
-                }
+                    client_id
+                };
+                client.set_client_id().await;
+                client
             }
             Err(e) => {
                 panic!("{e}");

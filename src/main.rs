@@ -10,6 +10,7 @@ use tokio;
 
 use rps::server::Server;
 use rps::client::Client;
+use uuid::Uuid;
 use rps::datagram::Message;
 use rmpv::Value;
 
@@ -65,7 +66,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         Some(Commands::TestClient { address }) => {
             println!("Running test client...");
-            let mut client = Client::new(address.to_string()).await;
+            let client_id = Uuid::new_v4().to_string();
+            let mut client = Client::new(address.to_string(), client_id).await;
             client.subscribe("*").await;
             client.subscribe("!health").await;
 
@@ -73,10 +75,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let write_future = tokio::spawn(async move {
                 loop {
                     client_clone
-                        .publish(Message::new(
-                            "test",
+                        .publish("test",
                             Value::from("Publishing from a separate task"),
-                        ))
+                        )
                         .await;
                     tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
                 }
