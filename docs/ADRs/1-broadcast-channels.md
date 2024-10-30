@@ -1,6 +1,6 @@
 # 1. Broadcast channels
 
-Status: Draft
+Status: Accepted
 
 Tokio's [broadcast channels](https://docs.rs/tokio/1.41.0/tokio/sync/broadcast/index.html) support many to many message sending between tasks.
 

@@ -1,9 +1,31 @@
 /* Glob tree
 
-A tree structure for storing glob patterns and efficiently matching a new string to stored glob patterns.
+A directional tree structure for storing a collection of glob patterns and efficiently checking a new string against stored patterns.
 
-In the context of this application, the glob tree is used to store subscription patterns for a single client,
-and to answer whether that client is insertd to a specific topic. */
+Each node in the tree represents a character of a pattern.
+
+**Example**
+Take the pattern 'fo*', if inserted into an empty tree the tree would look like this:
+```
+root
+  |_f
+    |_o
+      |_*
+```
+
+Many such patterns can be inserted into the tree. Use the `check()` method on a string to determine if any of the
+patterns in the tree match that string.
+
+The best applications of this data structure involve matching a high volume of strings against a large collection of distinct
+patterns.
+- Pub sub: Filtering messages sent to a client by checking the message topic against a tree of subscription patterns
+- File system scanning: searching over a file system for files matching a set of patterns
+
+Each node in the tree stores:
+- a token (char)
+- a reference count, indicating the number of distinct patterns that include that same node
+- a collection of child nodes
+*/
 
 use std::clone::Clone;
 use std::collections::HashMap;
@@ -12,8 +34,11 @@ use crate::config;
 
 #[derive(Debug, Clone, PartialEq)]
 struct Node {
+    // Token to store in this node
     token: Option<char>,
+    /// Collection of child nodes, with their tokens as keys
     children: HashMap<char, Node>,
+    /// Count of patterns which include this node
     count: u64,
 }
 impl Node {
@@ -31,16 +56,17 @@ impl Node {
         }
     }
 
-    /// Increment count
+    /// Increment reference count
     fn increment_count(&mut self) {
         self.count += 1;
     }
 
-    /// Decrement count
+    /// Decrement reference count
     fn decrement_count(&mut self) {
         self.count -= 1;
     }
 
+    /// The cumulative number of references to children of this node
     fn child_count(&self) -> u64 {
         self.children.iter().map(|(_, node)| node.count).sum()
     }
@@ -76,13 +102,13 @@ impl GlobTree {
         }
     }
 
-    /// Check if a string is matched
+    /// Check if a string is matched by a pattern in this tree
     ///
     /// Args
-    /// - topic: the topic to match
-    pub fn check(&self, topic: &str) -> bool {
+    /// - s: the string to match
+    pub fn check(&self, s: &str) -> bool {
         let mut cursor = &self.root;
-        for c in topic.chars() {
+        for c in s.chars() {
             // Get next character from chldren
             let mut next = cursor.children.get(&c);
 
@@ -105,9 +131,9 @@ impl GlobTree {
                 },
             }
         }
-        // Reached end of topic, but tree continues. This means there are overlapping patterns.
+        // Reached end of s, but tree may continue if there are overlapping patterns.
         // If the reference count of this node's children is less than the reference count of this node
-        // then we know the tree contained a matching pattern
+        // then we know the tree contains a pattern that terminates on this node
         cursor.child_count() < cursor.count
     }
 
@@ -121,6 +147,9 @@ impl GlobTree {
             }
             cursor = child.unwrap()
         }
+        // Reached end of pattern, but tree may continue if there are overlapping patterns.
+        // If the reference count of this node's children is less than the reference count of this node
+        // then we know the tree contains a pattern that terminates on this node
         return cursor.child_count() < cursor.count;
     }
 
