@@ -2,7 +2,7 @@
 
 A tree structure for storing glob patterns and efficiently matching a new string to stored glob patterns.
 
-In the context of this application, the glob tree is used to store subscription patterns for a single client, 
+In the context of this application, the glob tree is used to store subscription patterns for a single client,
 and to answer whether that client is subscribed to a specific topic. */
 
 use std::clone::Clone;
@@ -11,17 +11,17 @@ use std::collections::HashMap;
 use crate::config;
 
 #[derive(Debug, Clone, PartialEq)]
-struct Node{
+struct Node {
     token: Option<char>,
     children: HashMap<char, Node>,
     count: u64,
 }
 impl Node {
-    fn new(token: Option<char>) -> Node<> {
+    fn new(token: Option<char>) -> Node {
         Node {
             token,
             children: HashMap::new(),
-            count: 1
+            count: 1,
         }
     }
 
@@ -34,7 +34,7 @@ impl Node {
     fn increment(&mut self) {
         self.count += 1;
     }
-    
+
     fn decrement(&mut self) {
         self.count -= 1;
     }
@@ -61,7 +61,7 @@ impl SubscriptionTree {
                 Some(node) => {
                     cursor = cursor.children.get_mut(&c).expect("Existing node exists");
                     cursor.increment();
-                },
+                }
                 None => {
                     cursor.insert_child(Node::new(Some(c)));
                     cursor = cursor.children.get_mut(&c).expect("Inserted node exists");
@@ -80,7 +80,9 @@ impl SubscriptionTree {
             // Skip this check if first character of topic is the system_topic_prefix
             if !(cursor == &self.root && c == config::SYSTEM_TOPIC_PREFIX) {
                 // If wildcard character in children, topic is matched -- return True
-                if  cursor.children.get(&config::WILDCARD).is_some() { return true };
+                if cursor.children.get(&config::WILDCARD).is_some() {
+                    return true;
+                };
             }
 
             // println!("{:?} {:?}", c, cursor.children);
@@ -89,14 +91,13 @@ impl SubscriptionTree {
                 // Next character is in tree, continue search
                 Some(node) => {
                     cursor = node;
-                },
+                }
                 // Next character is not in tree, topic is not matched -- return False
-                None => {return false}
+                None => return false,
             }
-
         }
         // A pattern fully matches this topic, return True
-        true 
+        true
     }
 
     /// Returns true if pattern is in tree
@@ -105,11 +106,11 @@ impl SubscriptionTree {
         for c in pattern.chars() {
             let child = cursor.children.get_mut(&c);
             if child.is_none() {
-                return false
+                return false;
             }
             cursor = child.unwrap()
         }
-        return true
+        return true;
     }
 
     /// Delete a subscription
@@ -117,7 +118,7 @@ impl SubscriptionTree {
         if !self.pattern_in_tree(pattern) {
             return Err("Not found");
         }
-        // Delete subscription from Tree        
+        // Delete subscription from Tree
         let mut cursor = &mut self.root;
         for c in pattern.chars() {
             let child = cursor.children.get_mut(&c).unwrap();
@@ -129,7 +130,7 @@ impl SubscriptionTree {
                 // This token is referenced elsewhere, decrement count and do nothing
                 child.decrement();
                 cursor = cursor.children.get_mut(&c).unwrap();
-            }            
+            }
         }
         Ok(())
     }

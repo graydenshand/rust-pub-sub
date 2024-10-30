@@ -59,7 +59,12 @@ async fn it_publishes_and_receives_messages() {
 
     // Verify messages received matches messages sent
     for i in 0..messages.len() {
-        assert_eq!(messages[i], (received_messages[i].topic(), received_messages[i].value().to_owned()));
+        assert_eq!(
+            messages[i],
+            (
+                received_messages[i].topic(),
+                received_messages[i].value().to_owned()
+            )
+        );
     }
-    
 }

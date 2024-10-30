@@ -1,3 +1,4 @@
+use log::info;
 use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::TcpStream;
 
@@ -5,7 +6,6 @@ use crate::config;
 use crate::datagram::{Message, MessageReader, MessageWriter};
 use rmpv::Value;
 
-use log::{debug, info};
 use tokio::sync::mpsc;
 
 use std::error::Error;
@@ -95,12 +95,15 @@ impl Client {
     /// create a new subscription with the following pattern: `!`
     pub async fn subscribe(&self, pattern: &str) {
         let topic = format!("{}{}", config::SYSTEM_TOPIC_PREFIX, config::SUBSCRIBE_TOPIC);
-        self.publish(&topic, Value::from(pattern))
-            .await;
+        self.publish(&topic, Value::from(pattern)).await;
     }
 
     async fn set_client_id(&self) {
-        let topic = format!("{}{}", config::SYSTEM_TOPIC_PREFIX, config::SET_CLIENT_ID_TOPIC);
+        let topic = format!(
+            "{}{}",
+            config::SYSTEM_TOPIC_PREFIX,
+            config::SET_CLIENT_ID_TOPIC
+        );
         self.publish(&topic, Value::from(self.client_id.clone()))
             .await;
     }
@@ -131,7 +134,7 @@ impl Client {
                     tx: wtx,
                     rx: Some(rx),
                     addr,
-                    client_id
+                    client_id,
                 };
                 client.set_client_id().await;
                 client

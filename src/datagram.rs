@@ -7,15 +7,8 @@ use std::error::Error;
 
 use bytes::{Buf, BytesMut};
 
-use crate::config;
-use tokio;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-// use tokio::sync::mpsc::Receiver;
-use tokio::sync::broadcast::{Sender, Receiver};
-use tokio::time::Instant;
-use log::info;
-use std::future::Future;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Message {
@@ -28,7 +21,7 @@ impl Message {
         Message {
             topic: String::from(topic),
             value,
-            client_id: String::from(client_id)
+            client_id: String::from(client_id),
         }
     }
 
@@ -107,12 +100,12 @@ impl MessageReader {
     }
 
     /// Bind a function to this stream, invoke for every message received.
-    /// 
+    ///
     /// Returns the return value of the last function invocation
-    pub async fn bind<F>(
-        &mut self,
-        mut handler: F,
-    ) -> Result<(), Box<dyn Error>> where F: FnMut(Message) {
+    pub async fn bind<F>(&mut self, mut handler: F) -> Result<(), Box<dyn Error>>
+    where
+        F: FnMut(Message),
+    {
         loop {
             let message = self.read_value().await.ok();
             if message.is_none() || message.as_ref().unwrap().is_none() {
@@ -122,7 +115,7 @@ impl MessageReader {
                 let m: Message = message
                     .expect("message is Ok")
                     .expect("message is not None");
-                
+
                 handler(m);
             }
         }
