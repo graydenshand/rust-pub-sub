@@ -12,7 +12,7 @@ use tokio::time::Instant;
 
 use crate::config::{self, SYSTEM_TOPIC_PREFIX};
 use crate::datagram::{Message, MessageReader, MessageWriter};
-use crate::subscription_tree::{self};
+use crate::glob_tree::{self};
 
 #[derive(Debug)]
 struct Channel {
@@ -58,10 +58,19 @@ impl Command {
     fn on_receive(command: &Command, message: &Message, client_id: &mut String) -> () {
         match command {
             Command::Publish => {
-                debug!("{} - PUBLISH - {} {}", client_id, message.topic(), message.value());
+                debug!(
+                    "{} - PUBLISH - {} {}",
+                    client_id,
+                    message.topic(),
+                    message.value()
+                );
             }
             Command::Subscribe => {
-                debug!("{} - SUBSCRIBE - {}", client_id, message.value().as_str().unwrap());
+                debug!(
+                    "{} - SUBSCRIBE - {}",
+                    client_id,
+                    message.value().as_str().unwrap()
+                );
             }
             Command::SetClientId => {
                 debug!(
@@ -76,14 +85,14 @@ impl Command {
 }
 
 struct MessageProcessor {
-    subscribers: subscription_tree::SubscriptionTree,
+    subscriptions: glob_tree::GlobTree,
     writer: MessageWriter,
-    client_id: String,
+    client_id: Arc<Mutex<String>>,
 }
 impl MessageProcessor {
-    fn new(stream: OwnedWriteHalf, client_id: String) -> Self {
+    fn new(stream: OwnedWriteHalf, client_id: Arc<Mutex<String>>) -> Self {
         Self {
-            subscribers: subscription_tree::SubscriptionTree::new(),
+            subscriptions: glob_tree::GlobTree::new(),
             writer: MessageWriter::new(stream),
             client_id,
         }
@@ -93,23 +102,21 @@ impl MessageProcessor {
     ///
     /// Returns true if the message should get sent over connection
     async fn process_message(&mut self, message: &Message) -> bool {
-        // Handle system messages
-        if message.client_id() == self.client_id {
-            let command = Command::from_topic(message.topic());
-            if command.is_ok() {
-                match command.unwrap() {
-                    Command::Subscribe => {
-                        self.subscribers
-                            .subscribe(&message.value().as_str().unwrap());
-                    }
-                    Command::SetClientId => {
-                        self.client_id = message.value().as_str().unwrap().to_string();
-                    }
-                    _ => (),
+        let command = Command::from_topic(message.topic());
+        if command.is_ok() {
+            match command.unwrap() {
+                Command::Subscribe if message.client_id() == *self.client_id.lock().unwrap() => {
+                    self.subscriptions
+                        .insert(&message.value().as_str().unwrap());
                 }
+                _ => (),
             }
+        } else {
+            panic!("{}", command.err().unwrap())
         }
-        self.subscribers.is_subscribed(message.topic())
+        // Return message if not a system message and in subscriptions tree
+        self.subscriptions.check(message.topic())
+            && !message.topic().starts_with(config::SYSTEM_TOPIC_PREFIX)
     }
 
     /// Listen for messages over async channel, apply a filter, and forward over this connection
@@ -126,11 +133,13 @@ impl MessageProcessor {
     }
 }
 
-struct Connection {}
+struct Connection {
+    client_id: Arc<Mutex<String>>,
+}
 impl Connection {
     fn open(stream: tokio::net::TcpStream, channel: Channel) {
-        let client_id = Uuid::new_v4().to_string();
-        info!("{} - CONNECT", client_id);
+        let client_id = Arc::new(Mutex::new(Uuid::new_v4().to_string()));
+        info!("{} - CONNECT", client_id.lock().unwrap());
 
         // Split read and write halves of stream
         let (r, w) = stream.into_split();
@@ -150,27 +159,38 @@ impl Connection {
     }
 
     /// Receive messages from client and broadcast to rest of system
-    async fn recv(stream: OwnedReadHalf, tx: broadcast::Sender<Message>, mut client_id: String) {
+    async fn recv(
+        stream: OwnedReadHalf,
+        tx: broadcast::Sender<Message>,
+        mut client_id: Arc<Mutex<String>>,
+    ) {
         let mut reader = MessageReader::new(stream);
         reader
             .bind(|m| {
                 match Command::from_topic(m.topic()) {
-                    Ok(command) => {
-                        match command {
-                            Command::Publish => {
-                                debug!("{} - PUBLISH - {} {}", client_id, m.topic(), m.value());
-                            }
-                            Command::Subscribe => {
-                                debug!("{} - SUBSCRIBE - {}", client_id, m.value().as_str().unwrap());
-                            }
-                            Command::SetClientId => {
-                                debug!(
-                                    "{} - SET CLIENT ID - {}",
-                                    client_id,
-                                    m.value().as_str().unwrap()
-                                );
-                                client_id = m.value().as_str().unwrap().to_string();
-                            }
+                    Ok(command) => match command {
+                        Command::Publish => {
+                            debug!(
+                                "{} - PUBLISH - {} {}",
+                                client_id.lock().unwrap(),
+                                m.topic(),
+                                m.value()
+                            );
+                        }
+                        Command::Subscribe => {
+                            debug!(
+                                "{} - SUBSCRIBE - {}",
+                                client_id.lock().unwrap(),
+                                m.value().as_str().unwrap()
+                            );
+                        }
+                        Command::SetClientId => {
+                            debug!(
+                                "{} - SET CLIENT ID - {}",
+                                client_id.lock().unwrap(),
+                                m.value().as_str().unwrap()
+                            );
+                            *client_id.lock().unwrap() = m.value().as_str().unwrap().to_string();
                         }
                     },
                     Err(e) => {
@@ -181,11 +201,15 @@ impl Connection {
             })
             .await
             .unwrap();
-        info!("{client_id} - DISCONNECT");
+        info!("{} - DISCONNECT", client_id.lock().unwrap());
     }
 
     /// Bind a MessageProcessor to the broadcast channel and listen for messages
-    async fn send(stream: OwnedWriteHalf, rx: broadcast::Receiver<Message>, client_id: String) {
+    async fn send(
+        stream: OwnedWriteHalf,
+        rx: broadcast::Receiver<Message>,
+        client_id: Arc<Mutex<String>>,
+    ) {
         tokio::spawn(async {
             let mut message_processor: MessageProcessor = MessageProcessor::new(stream, client_id);
             message_processor.bind_to_channel(rx).await.ok();
