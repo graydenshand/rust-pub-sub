@@ -1,31 +1,30 @@
-/* Glob tree
+/// Glob tree
 
-A directional tree structure for storing a collection of glob patterns and efficiently checking a new string against stored patterns.
+/// A directional tree structure for storing a collection of glob patterns and efficiently checking a new string against stored patterns.
 
-Each node in the tree represents a character of a pattern.
+/// Each node in the tree represents a character of a pattern.
 
-**Example**
-Take the pattern 'fo*', if inserted into an empty tree the tree would look like this:
-```
-root
-  |_f
-    |_o
-      |_*
-```
+/// **Example**
+/// Take the pattern 'fo*', if inserted into an empty tree the tree would look like this:
+/// ```
+/// root
+///   |_f
+///     |_o
+///       |_*
+/// ```
 
-Many such patterns can be inserted into the tree. Use the `check()` method on a string to determine if any of the
-patterns in the tree match that string.
+/// Many such patterns can be inserted into the tree. Use the `check()` method on a string to determine if any of the
+/// patterns in the tree match that string.
 
-The best applications of this data structure involve matching a high volume of strings against a large collection of distinct
-patterns.
-- Pub sub: Filtering messages sent to a client by checking the message topic against a tree of subscription patterns
-- File system scanning: searching over a file system for files matching a set of patterns
+/// The best applications of this data structure involve matching a high volume of strings against a large collection of distinct
+/// patterns.
+/// - Pub sub: Filtering messages sent to a client by checking the message topic against a tree of subscription patterns
+/// - File system scanning: searching over a file system for files matching a set of patterns
 
-Each node in the tree stores:
-- a token (char)
-- a reference count, indicating the number of distinct patterns that include that same node
-- a collection of child nodes
-*/
+/// Each node in the tree stores:
+/// - a token (char)
+/// - a reference count, indicating the number of distinct patterns that include that same node
+/// - a collection of child nodes
 
 use std::clone::Clone;
 use std::collections::HashMap;
