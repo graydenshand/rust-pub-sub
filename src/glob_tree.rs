@@ -2,7 +2,7 @@
 ///
 /// A directional tree structure for storing a collection of glob patterns and efficiently checking a new string against stored patterns.
 ///
-/// Each node in the tree represents a character of a pattern.
+/// Each node in the tree represents a single character of a pattern.
 ///
 /// **Example**
 /// Take the pattern 'fo*', if inserted into an empty tree the tree would look like this:
@@ -15,8 +15,9 @@
 ///
 /// Many such patterns can be inserted into the tree. Use the `check()` method on a string to determine if any of the
 /// patterns in the tree match that string.
-/// 
-/// The asterisk "*" is a wildcard character, matching any character.
+///
+/// The asterisk "*" is a wildcard character, matching any characters. For example, the pattern `foo*` matches both
+/// `"food"` and `"football"`. A wildcard isn't limited to the end of the string,
 ///
 /// The best applications of this data structure involve matching a high volume of strings against a large collection of distinct
 /// patterns.
@@ -27,7 +28,6 @@
 /// - a token (char)
 /// - a reference count, indicating the number of distinct patterns that include that same node
 /// - a collection of child nodes
-
 use std::clone::Clone;
 use std::collections::HashMap;
 
@@ -71,6 +71,41 @@ impl Node {
     fn child_count(&self) -> u64 {
         self.children.iter().map(|(_, node)| node.count).sum()
     }
+
+    /// Returns true if this node terminates a pattern
+    fn is_terminal(&self) -> bool {
+        self.child_count() < self.count
+    }
+
+    /// List all strings below this node
+    ///
+    /// Recursively appends child characters
+    fn list_strings(&self) -> Vec<String> {
+        self._list_strings_worker("".into())
+    }
+
+    // Recursive target for list_strings() method
+    fn _list_strings_worker(&self, mut string: String) -> Vec<String> {
+        // Create output vector
+        let mut strings = vec![];
+
+        // Append this node's token token (don't do anything if root node)
+        if let Some(token) = self.token {
+            string.push(token);
+        }
+        // If this node terminates a string, append string to the output
+        if self.is_terminal() {
+            strings.push(string.clone())
+        }
+
+        // Get strings of all child nodes, and append to output
+        for child in self.children.values() {
+            let mut child_strings = child._list_strings_worker(string.clone());
+            strings.append(&mut child_strings);
+        }
+
+        strings
+    }
 }
 
 #[derive(Debug)]
@@ -86,11 +121,11 @@ impl GlobTree {
     }
 
     /// Add a pattern to the tree
-    /// 
+    ///
     /// Args:
     ///     pattern: a pattern to insert
-    /// 
-    /// 
+    ///
+    ///
     pub fn insert(&mut self, pattern: &str) {
         // Cursor stores the current node
         let mut cursor = &mut self.root;
@@ -114,6 +149,7 @@ impl GlobTree {
     /// - s: the string to match
     pub fn check(&self, s: &str) -> bool {
         let mut cursor = &self.root;
+        let mut active_wildcard: Option<&Node> = None;
         for c in s.chars() {
             // Get next character from chldren
             let mut next = cursor.children.get(&c);
@@ -121,6 +157,9 @@ impl GlobTree {
             // If not found, look for wildcard
             if next.is_none() {
                 next = cursor.children.get(&config::WILDCARD);
+                if next.is_some() {
+                    active_wildcard = next;
+                }
             }
 
             // If next
@@ -129,18 +168,34 @@ impl GlobTree {
                 Some(node) => {
                     cursor = node;
                 }
-                // Terminal node (no children), return false if previous character was not a wildcard
-                None => match cursor.token {
-                    Some(token) => return token == config::WILDCARD,
-                    // root node has no children, empty tree
-                    None => return false,
-                },
+                // No children matching next token in pattern
+                None => {
+                    match active_wildcard {
+                        // There is an active wildcard, reset cursor to this node and continue searching
+                        Some(node) => {
+                            // Last character in pattern is a wildcard, string is matched
+                            if node.is_terminal() {
+                                return true;
+                            }
+                            // There are more tokens in pattern beyond wildcard, so reset cursor to wildcard node.
+                            // This is necessary when a wildcard is followed by several characters (e.g. '*1234').
+                            // All characters beyond the wildcard must be matched consecutively for the string to be a
+                            // match. E.g. `1235_1234` matches `*1234`, but not until the end. When we encounter the
+                            // token '5', this doesn't invalidate the match (because of the wildcard), but we also need
+                            // to  reset the active token in the cursor to the wildcard to correctly match the next
+                            // token in the pattern (in this case, '1').
+                            cursor = node
+                        }
+                        // No active wildcard, string doesn't match any patterns
+                        None => return false,
+                    }
+                }
             }
         }
         // Reached end of s, but tree may continue if there are overlapping patterns.
         // If the reference count of this node's children is less than the reference count of this node
         // then we know the tree contains a pattern that terminates on this node
-        cursor.child_count() < cursor.count
+        cursor.is_terminal()
     }
 
     /// Returns true if tree contains pattern
@@ -156,7 +211,12 @@ impl GlobTree {
         // Reached end of pattern, but tree may continue if there are overlapping patterns.
         // If the reference count of this node's children is less than the reference count of this node
         // then we know the tree contains a pattern that terminates on this node
-        return cursor.child_count() < cursor.count;
+        return cursor.is_terminal();
+    }
+
+    /// List all patterns in the tree
+    pub fn list(&self) -> Vec<String> {
+        self.root.list_strings()
     }
 
     /// Remove a pattern from the tree
@@ -217,6 +277,7 @@ mod tests {
         t.insert(&format!("fooo{}ar", config::WILDCARD));
         assert!(t.check("fooozar".into()));
         assert!(t.check("fooo/zbasfjadfasldfjah/ar".into()));
+        assert!(!t.check("fooo/zbasfjadfasldfjah/".into()));
         assert!(!t.check("fooozarnt".into()));
     }
 
@@ -247,5 +308,44 @@ mod tests {
         let mut t = GlobTree::new();
         t.insert("testing");
         assert!(!t.contains("test".into()));
+    }
+
+    #[test]
+    fn node_list_strings() {
+        let mut a = Node::new(Some('a'));
+        let mut b = Node::new(Some('b'));
+        let mut c = Node::new(Some('c'));
+        let b2 = Node::new(Some('b'));
+        let d = Node::new(Some('d'));
+        // c included 2 times
+        c.insert_child(d);
+        c.increment_count();
+
+        // b included three times (the node, not the character 'b')
+        b.insert_child(c);
+        b.insert_child(b2);
+        b.increment_count();
+        b.increment_count();
+
+        // a included three times
+        a.insert_child(b);
+        a.increment_count();
+        a.increment_count();
+        assert_eq!(a.list_strings(), vec!["abb", "abc", "abcd"]);
+    }
+
+    #[test]
+    fn test_list() {
+        let mut t = GlobTree::new();
+        let mut patterns = vec![
+            ".venv",
+            ".DS_STORE",
+            "~/Documents/Important/2024/*",
+            "*.exe",
+        ];
+        for pattern in &patterns {
+            t.insert(&pattern);
+        }
+        assert_eq!(patterns.sort(), t.list().sort());
     }
 }
