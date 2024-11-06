@@ -32,3 +32,27 @@ Connection { stream, subscriptions, tx, rx }
 - recv()
 - send()
 ```
+
+### EDIT 1: Broadcast channel per topic
+
+Under this scheme, instead of a global broadcast channel that distributes every message to every connection, each topic could have an associated channel for delivering messages only to the connections of subscribers.
+
+#### Pros
+
+The principal benefit of this approach is that each connection does not need to check every message to see if it matches a subscription. The check is a function call that runs in linear time with respect to the length of the topic name.
+
+Some napkin math:
+    Each call to `GlobTree.check` takes on avg 2.2 microseconds (benchmarked against a 100 character string).
+    At 1000 clients, this call costs 2.2 milliseconds per message.
+
+Switching to channel-per-topic shifts some of that work out of the innermost nested code of the application. The per-connection invocation of `check` is replace with a single hashmap lookup to find the channel to broadcast to.
+
+#### Cons
+
+The tradeoff involves added complexity on the server to manage these channels. The first time a message is published to a topic, a new channel must be created for that topic, and every client must check if it should receive messages from this topic. Additionally, when a client subscribes to a new pattern, all topics known to the server must be scanned to see which channels to subscribe to.
+
+This would also require reintroducing a mpsc channel for publishing messages. Each connection would emit the message back to the server task via a mpsc. The server then looks up the broadcast channel for the messages topic (creating a new one if needed), and forwards the message over the broadcast channel to any subscribed connections.
+
+A robust implementation would also bound the number of topics supported by the server, as well as provide a means of pruning channels which are no longer needed. One approach to this would be for a background task to prune channels on an interval, as determined by the time since the last message in that channel.
+
+At a minimum this proposal requires the Server to keep a collection of active Topics. A specific Topic can be retrieved by name. Each Topic stores the sender and receiver for that channel. The server also needs to store a sender and receiver for a broadcast channel, to enable it to broadcast system changes to connections (such as the creation of a new channel). Every connection should have a reference to the server in order to subscribe to new channels.
