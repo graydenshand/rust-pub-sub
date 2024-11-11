@@ -331,7 +331,7 @@ mod tests {
         a.insert_child(b);
         a.increment_count();
         a.increment_count();
-        assert_eq!(a.list_strings(), vec!["abb", "abc", "abcd"]);
+        assert_eq!(a.list_strings(), vec!["abc", "abcd", "abb"]);
     }
 
     #[test]

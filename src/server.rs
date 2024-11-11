@@ -10,14 +10,14 @@ use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpListener;
 use tokio::time::Instant;
 
-use crate::config::{self, SYSTEM_TOPIC_PREFIX};
-use crate::datagram::{Message, MessageReader, MessageWriter};
+use crate::config;
+use crate::datagram::{Command, Datagram, bind_stream, send_rmp_value};
 use crate::glob_tree::{self};
 
 #[derive(Debug)]
 struct Channel {
-    tx: broadcast::Sender<Message>,
-    rx: broadcast::Receiver<Message>,
+    tx: broadcast::Sender<Datagram>,
+    rx: broadcast::Receiver<Datagram>,
 }
 impl Channel {
     fn new(capacity: usize) -> Self {
@@ -34,99 +34,39 @@ impl Clone for Channel {
     }
 }
 
-enum Command {
-    /// Publish a message
-    Publish,
-    /// Subscribe to a topic
-    Subscribe,
-    /// Set client id of current session
-    SetClientId,
-}
-impl Command {
-    fn from_topic(topic: &str) -> Result<Command, Box<dyn Error>> {
-        if !topic.starts_with(config::SYSTEM_TOPIC_PREFIX) {
-            return Ok(Command::Publish);
-        };
-        match topic.trim_start_matches(config::SYSTEM_TOPIC_PREFIX) {
-            config::SUBSCRIBE_TOPIC => Ok(Command::Subscribe),
-            config::SET_CLIENT_ID_TOPIC => Ok(Command::SetClientId),
-            _ => Err("Unrecognized system topic".into()),
-        }
-    }
-
-    /// Hook that runs when the message is initially received from the client
-    fn on_receive(command: &Command, message: &Message, client_id: &mut String) -> () {
-        match command {
-            Command::Publish => {
-                debug!(
-                    "{} - PUBLISH - {} {}",
-                    client_id,
-                    message.topic(),
-                    message.value()
-                );
-            }
-            Command::Subscribe => {
-                debug!(
-                    "{} - SUBSCRIBE - {}",
-                    client_id,
-                    message.value().as_str().unwrap()
-                );
-            }
-            Command::SetClientId => {
-                debug!(
-                    "{} - SET CLIENT ID - {}",
-                    client_id,
-                    message.value().as_str().unwrap()
-                );
-                *client_id = message.value().as_str().unwrap().to_string();
-            }
-        }
-    }
-}
-
-struct MessageProcessor {
+struct DatagramProcessor {
     subscriptions: glob_tree::GlobTree,
-    writer: MessageWriter,
     client_id: Arc<Mutex<String>>,
+    stream: OwnedWriteHalf,
 }
-impl MessageProcessor {
+impl DatagramProcessor {
     fn new(stream: OwnedWriteHalf, client_id: Arc<Mutex<String>>) -> Self {
         Self {
             subscriptions: glob_tree::GlobTree::new(),
-            writer: MessageWriter::new(stream),
+            stream,
             client_id,
         }
-    }
-
-    /// Process a message
-    ///
-    /// Returns true if the message should get sent over connection
-    async fn process_message(&mut self, message: &Message) -> bool {
-        let command = Command::from_topic(message.topic());
-        if command.is_ok() {
-            match command.unwrap() {
-                Command::Subscribe if message.client_id() == *self.client_id.lock().unwrap() => {
-                    self.subscriptions
-                        .insert(&message.value().as_str().unwrap());
-                }
-                _ => (),
-            }
-        } else {
-            panic!("{}", command.err().unwrap())
-        }
-        // Return message if not a system message and in subscriptions tree
-        self.subscriptions.check(message.topic())
-            && !message.topic().starts_with(config::SYSTEM_TOPIC_PREFIX)
     }
 
     /// Listen for messages over async channel, apply a filter, and forward over this connection
     pub async fn bind_to_channel(
         &mut self,
-        mut rx: broadcast::Receiver<Message>,
+        mut rx: broadcast::Receiver<Datagram>,
     ) -> Result<(), Box<dyn Error>> {
-        while let Some(message) = rx.recv().await.ok() {
-            if self.process_message(&message).await {
-                self.writer.send(message).await?
+
+        while let Some(datagram) = rx.recv().await.ok() {
+            match &datagram.command {
+                Command::Subscribe { pattern } => {
+                    // Add a new subscription for this client
+                    self.subscriptions.insert(pattern);
+                },
+                Command::Publish { message } =>  {
+                    // Check if published message is in this client's subscriptions before sending
+                    if self.subscriptions.check(&message.topic) {
+                        send_rmp_value(&mut self.stream, message).await.unwrap();
+                    }
+                },
+                _ => ()
             }
         }
         Ok(())
@@ -161,57 +101,56 @@ impl Connection {
     /// Receive messages from client and broadcast to rest of system
     async fn recv(
         stream: OwnedReadHalf,
-        tx: broadcast::Sender<Message>,
-        mut client_id: Arc<Mutex<String>>,
+        tx: broadcast::Sender<Datagram>,
+        client_id: Arc<Mutex<String>>,
     ) {
-        let mut reader = MessageReader::new(stream);
-        reader
-            .bind(|m| {
-                match Command::from_topic(m.topic()) {
-                    Ok(command) => match command {
-                        Command::Publish => {
-                            debug!(
-                                "{} - PUBLISH - {} {}",
-                                client_id.lock().unwrap(),
-                                m.topic(),
-                                m.value()
-                            );
-                        }
-                        Command::Subscribe => {
-                            debug!(
-                                "{} - SUBSCRIBE - {}",
-                                client_id.lock().unwrap(),
-                                m.value().as_str().unwrap()
-                            );
-                        }
-                        Command::SetClientId => {
-                            debug!(
-                                "{} - SET CLIENT ID - {}",
-                                client_id.lock().unwrap(),
-                                m.value().as_str().unwrap()
-                            );
-                            *client_id.lock().unwrap() = m.value().as_str().unwrap().to_string();
-                        }
-                    },
-                    Err(e) => {
-                        warn!("{}", e);
-                    }
+        bind_stream(stream, |datagram: Datagram| async {
+            println!("{:?}", datagram);
+            match &datagram.command {
+                Command::Publish { message } => {
+                    let c = client_id.lock().unwrap();
+                    debug!(
+                        "{} - PUBLISH - {} {}",
+                        c,
+                        message.topic,
+                        message.value
+                    );
                 }
-                tx.send(m).unwrap();
-            })
-            .await
-            .unwrap();
+                Command::Subscribe { pattern } => {
+                    let c = client_id.lock().unwrap();
+                    debug!(
+                        "{} - SUBSCRIBE - {}",
+                        c,
+                        pattern
+                    );
+                }
+                Command::SetClientId { id } => {
+                    {
+                        let c = client_id.lock().unwrap();
+                        debug!(
+                            "{} - SET CLIENT ID - {}",
+                            c,
+                            id
+                        );
+                    }
+                    *client_id.lock().unwrap() = id.to_string();
+                }
+            };
+            tx.send(datagram).unwrap();
+        })
+        .await
+        .unwrap();
         info!("{} - DISCONNECT", client_id.lock().unwrap());
     }
 
-    /// Bind a MessageProcessor to the broadcast channel and listen for messages
+    /// Bind a DatagramProcessor to the broadcast channel and listen for messages
     async fn send(
         stream: OwnedWriteHalf,
-        rx: broadcast::Receiver<Message>,
+        rx: broadcast::Receiver<Datagram>,
         client_id: Arc<Mutex<String>>,
     ) {
         tokio::spawn(async {
-            let mut message_processor: MessageProcessor = MessageProcessor::new(stream, client_id);
+            let mut message_processor: DatagramProcessor = DatagramProcessor::new(stream, client_id);
             message_processor.bind_to_channel(rx).await.ok();
         });
     }
