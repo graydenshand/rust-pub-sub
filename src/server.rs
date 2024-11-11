@@ -1,4 +1,4 @@
-use log::{debug, info};
+use log::{debug, info, warn};
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -8,7 +8,6 @@ use tokio::sync::broadcast;
 
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpListener;
-
 
 use crate::config;
 use crate::datagram::{bind_stream, send_rmp_value, Command, Datagram};
@@ -53,22 +52,30 @@ impl DatagramProcessor {
         &mut self,
         mut rx: broadcast::Receiver<Datagram>,
     ) -> Result<(), Box<dyn Error>> {
-        while let Some(datagram) = rx.recv().await.ok() {
-            match &datagram.command {
-                Command::Subscribe { pattern } => {
-                    // Add a new subscription for this client
-                    self.subscriptions.insert(pattern);
-                }
-                Command::Publish { message } => {
-                    // Check if published message is in this client's subscriptions before sending
-                    if self.subscriptions.check(&message.topic) {
-                        send_rmp_value(&mut self.stream, message).await.unwrap();
+        loop {
+            let datagram = rx.recv().await;
+            match datagram {
+                Ok(d) => {
+                    match &d.command {
+                        Command::Subscribe { pattern } => {
+                            // Add a new subscription for this client
+                            self.subscriptions.insert(pattern);
+                        }
+                        Command::Publish { message } => {
+                            // Check if published message is in this client's subscriptions before sending
+                            if self.subscriptions.check(&message.topic) {
+                                send_rmp_value(&mut self.stream, message).await.unwrap();
+                            }
+                        }
+                        _ => (),
                     }
                 }
-                _ => (),
+                Err(e) => {
+                    warn!("{e}");
+                    continue;
+                }
             }
         }
-        Ok(())
     }
 }
 
@@ -104,23 +111,15 @@ impl Connection {
         client_id: Arc<Mutex<String>>,
     ) {
         bind_stream(stream, |datagram: Datagram| async {
-            println!("{:?}", datagram);
+            {
+                let c = client_id.lock().unwrap();
+                // debug!("{} - {}", c, datagram.command);
+            }
             match &datagram.command {
-                Command::Publish { message } => {
-                    let c = client_id.lock().unwrap();
-                    debug!("{} - PUBLISH - {} {}", c, message.topic, message.value);
-                }
-                Command::Subscribe { pattern } => {
-                    let c = client_id.lock().unwrap();
-                    debug!("{} - SUBSCRIBE - {}", c, pattern);
-                }
                 Command::SetClientId { id } => {
-                    {
-                        let c = client_id.lock().unwrap();
-                        debug!("{} - SET CLIENT ID - {}", c, id);
-                    }
                     *client_id.lock().unwrap() = id.to_string();
                 }
+                _ => (),
             };
             tx.send(datagram).unwrap();
         })
@@ -138,8 +137,13 @@ impl Connection {
         tokio::spawn(async {
             let mut message_processor: DatagramProcessor =
                 DatagramProcessor::new(stream, client_id);
-            message_processor.bind_to_channel(rx).await.ok();
-        });
+            message_processor
+                .bind_to_channel(rx)
+                .await
+                .expect("Processes messages from channel");
+        })
+        .await
+        .expect("Message processor failed");
     }
 }
 

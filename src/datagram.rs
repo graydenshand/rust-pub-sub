@@ -8,14 +8,10 @@ use std::error::Error;
 
 use bytes::{Buf, BytesMut};
 
-
-
+use std::fmt;
 use std::future::Future;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-
-
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Message {
@@ -32,8 +28,26 @@ pub enum Command {
     /// Set the client id for this session
     SetClientId { id: String },
 }
-impl Command {}
-
+impl fmt::Display for Command {
+    // This trait requires `fmt` with this exact signature.
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // Write strictly the first element into the supplied output
+        // stream: `f`. Returns `fmt::Result` which indicates whether the
+        // operation succeeded or failed. Note that `write!` uses syntax which
+        // is very similar to `println!`.
+        match self {
+            Self::Publish { message } => {
+                write!(f, "PUBLISH - {} - {:?}", message.topic, message.value)
+            }
+            Self::Subscribe { pattern } => {
+                write!(f, "SUBSCRIBE - {pattern}")
+            }
+            Self::SetClientId { id } => {
+                write!(f, "SET CLIENT ID - {id}")
+            }
+        }
+    }
+}
 /// Read a msg_pack value from a stream
 pub async fn read_stream<T, S>(
     stream: &mut T,

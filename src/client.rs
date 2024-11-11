@@ -72,7 +72,7 @@ impl Client {
         if self.rx.is_some() {
             tokio::select! {
                 message = self.rx.as_mut().unwrap().recv() => {
-                    Some(message.expect("datagram::Command can be decoded"))
+                    message
                 },
                 _ = Self::optional_timeout(timeout) => {
                     None
@@ -88,7 +88,7 @@ impl Client {
         stream: OwnedReadHalf,
         tx: Sender<datagram::Message>,
     ) -> Result<(), Box<dyn Error>> {
-        datagram::bind_stream(stream, |message| async {
+        datagram::bind_stream(stream, |message: datagram::Message| async {
             tx.send(message).await.expect("Ok")
         })
         .await

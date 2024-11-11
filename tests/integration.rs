@@ -40,7 +40,6 @@ async fn it_publishes_and_receives_messages() {
             .recv(Some(tokio::time::Duration::from_millis(500)))
             .await
         {
-            println!("{:?}", message);
             received_messages.push(message);
             if received_messages.len() >= n_messages {
                 break;
@@ -52,7 +51,6 @@ async fn it_publishes_and_receives_messages() {
     // Publish each of the messages defined above
     let messages_clone = messages.clone();
     for (topic, value) in messages_clone {
-        println!("PUBLISH - {topic} - {value}");
         client_clone.publish(topic, value).await;
     }
 
@@ -60,7 +58,6 @@ async fn it_publishes_and_receives_messages() {
     let received_messages = read_future.await.unwrap();
 
     // Verify messages received matches messages sent
-    println!("a");
     for i in 0..messages.len() {
         assert_eq!(messages[i].0, received_messages[i].topic);
         assert_eq!(messages[i].1, received_messages[i].value);
