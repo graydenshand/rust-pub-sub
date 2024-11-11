@@ -77,7 +77,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 loop {
                     client_clone.publish("test", Value::from(i)).await;
                     i += 1;
-                    // tokio::time::sleep(tokio::time::Duration::from_nanos(1)).await;
                 }
             });
 
@@ -91,22 +90,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         debug!("Message received - {topic} - {value}");
                     };
                     i += 1;
-                }
+                };
                 panic!("Unexpectedly stopped receiving messages.")
             });
 
             tokio::select!(
-                a = read_future => {
+                _ = read_future => {
                     panic!("Stopped receiving messages")
                 },
-                b = write_future => {
+                _ = write_future => {
                     panic!("Stopped sending messages")
                 }
             );
-
-            // let (r, w) = tokio::join!(read_future, write_future);
-            // r.unwrap();
-            // w.unwrap();
         }
         None => {}
     };
