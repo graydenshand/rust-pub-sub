@@ -27,7 +27,6 @@ async fn it_publishes_and_receives_messages() {
     // Subscribe to all messages
     client.subscribe("*").await;
 
-
     // Spawn a task to listen for messages
     //
     // The task will receive messages until all messages are accounted for, or

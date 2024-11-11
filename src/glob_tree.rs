@@ -29,7 +29,7 @@
 /// - a reference count, indicating the number of distinct patterns that include that same node
 /// - a collection of child nodes
 use std::clone::Clone;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use crate::config;
 
@@ -38,7 +38,7 @@ struct Node {
     // Token to store in this node
     token: Option<char>,
     /// Collection of child nodes, with their tokens as keys
-    children: HashMap<char, Node>,
+    children: BTreeMap<char, Node>,
     /// Count of patterns which include this node
     count: u64,
 }
@@ -46,7 +46,7 @@ impl Node {
     fn new(token: Option<char>) -> Node {
         Node {
             token,
-            children: HashMap::new(),
+            children: BTreeMap::new(),
             count: 1,
         }
     }
@@ -331,7 +331,7 @@ mod tests {
         a.insert_child(b);
         a.increment_count();
         a.increment_count();
-        assert_eq!(a.list_strings(), vec!["abc", "abcd", "abb"]);
+        assert_eq!(a.list_strings(), vec!["abb", "abc", "abcd"]);
     }
 
     #[test]

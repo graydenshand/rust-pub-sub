@@ -31,16 +31,20 @@ impl Clone for Client {
     }
 }
 impl Client {
-
     async fn send_command(&self, command: datagram::Command) {
-        self.tx.send(command).await.expect("datagram::Command was sent")
+        self.tx
+            .send(command)
+            .await
+            .expect("datagram::Command was sent")
     }
-
 
     /// Publish a message to the server
     pub async fn publish(&self, topic: &str, value: Value) {
-        let message = datagram::Message { topic: topic.to_string(), value };
-        let command = datagram::Command::Publish{ message };
+        let message = datagram::Message {
+            topic: topic.to_string(),
+            value,
+        };
+        let command = datagram::Command::Publish { message };
         self.send_command(command).await;
     }
 
@@ -61,7 +65,10 @@ impl Client {
     ///
     /// Returns a datagram::Command, or None when the connection has closed or timeout has
     /// been reached
-    pub async fn recv(&mut self, timeout: Option<tokio::time::Duration>) -> Option<datagram::Message> {
+    pub async fn recv(
+        &mut self,
+        timeout: Option<tokio::time::Duration>,
+    ) -> Option<datagram::Message> {
         if self.rx.is_some() {
             tokio::select! {
                 message = self.rx.as_mut().unwrap().recv() => {
@@ -83,7 +90,8 @@ impl Client {
     ) -> Result<(), Box<dyn Error>> {
         datagram::bind_stream(stream, |message| async {
             tx.send(message).await.expect("Ok")
-        }).await
+        })
+        .await
     }
 
     /// Subscribe to messages on topics matching the specified pattern
@@ -94,12 +102,16 @@ impl Client {
     /// and are excluded in wildcard matches. To subscribe to all system messages,
     /// create a new subscription with the following pattern: `!`
     pub async fn subscribe(&self, pattern: &str) {
-        let command = datagram::Command::Subscribe{ pattern: pattern.to_string()};
+        let command = datagram::Command::Subscribe {
+            pattern: pattern.to_string(),
+        };
         self.send_command(command).await;
     }
 
     async fn set_client_id(&self) {
-        let command = datagram::Command::SetClientId { id: self.client_id.to_string() };
+        let command = datagram::Command::SetClientId {
+            id: self.client_id.to_string(),
+        };
         self.send_command(command).await;
     }
 
@@ -118,14 +130,14 @@ impl Client {
                 tokio::spawn(async move {
                     _ = Client::receive_loop(r, tx).await.unwrap();
                 });
-                let (wtx, mut wrx) = mpsc::channel::<datagram::Command>(config::CHANNEL_BUFFER_SIZE);
+                let (wtx, mut wrx) =
+                    mpsc::channel::<datagram::Command>(config::CHANNEL_BUFFER_SIZE);
                 let client_id_clone = client_id.clone();
                 tokio::spawn(async move {
                     while let Some(cmd) = wrx.recv().await {
                         let datagram = datagram::Datagram::new(cmd, &client_id_clone);
                         datagram::send_rmp_value(&mut w, datagram).await.unwrap();
                     }
-
                 });
                 let client = Client {
                     tx: wtx,

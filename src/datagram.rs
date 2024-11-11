@@ -1,21 +1,21 @@
 use rmp_serde::Serializer;
 use rmpv::Value;
-use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 use rmp_serde;
 use std::error::Error;
 
 use bytes::{Buf, BytesMut};
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::io::{AsyncWrite, AsyncRead};
-use std::future::Future;
-use core::pin::Pin;
-use futures::task::{Context, Poll};
 
-use futures::stream::Stream;
+
+use std::future::Future;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+
+
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Message {
@@ -35,7 +35,14 @@ pub enum Command {
 impl Command {}
 
 /// Read a msg_pack value from a stream
-pub async fn read_stream<T, S>(stream: &mut T, mut buffer: &mut BytesMut) -> Result<Option<S>, Box<dyn Error>> where T: AsyncReadExt + std::marker::Unpin, S: DeserializeOwned {
+pub async fn read_stream<T, S>(
+    stream: &mut T,
+    mut buffer: &mut BytesMut,
+) -> Result<Option<S>, Box<dyn Error>>
+where
+    T: AsyncReadExt + std::marker::Unpin,
+    S: DeserializeOwned,
+{
     loop {
         // Attempt to parse a frame from the buffered data. If
         // enough data has been buffered, the frame is
@@ -79,7 +86,7 @@ pub struct Datagram {
     pub sender: String,
 }
 impl Datagram {
-    pub fn new (command: Command, sender: &str) -> Datagram {
+    pub fn new(command: Command, sender: &str) -> Datagram {
         Datagram {
             command,
             sender: sender.to_string(),
@@ -87,8 +94,12 @@ impl Datagram {
     }
 }
 
- /// Send a rust msgpack value over a stream
-pub async fn send_rmp_value<T, D>(stream: &mut T, value: D) -> Result<(), Box<dyn Error>> where T: AsyncWrite + std::marker::Unpin, D: Serialize {
+/// Send a rust msgpack value over a stream
+pub async fn send_rmp_value<T, D>(stream: &mut T, value: D) -> Result<(), Box<dyn Error>>
+where
+    T: AsyncWrite + std::marker::Unpin,
+    D: Serialize,
+{
     let mut buf = Vec::new();
     value.serialize(&mut Serializer::new(&mut buf)).unwrap();
     stream.write(&mut buf).await?;
@@ -100,7 +111,7 @@ pub async fn bind_stream<T, F, Fut, S>(mut stream: T, mut handler: F) -> Result<
 where
     T: AsyncRead + std::marker::Unpin,
     F: FnMut(S) -> Fut,
-    Fut: Future<Output=()>,
+    Fut: Future<Output = ()>,
     S: DeserializeOwned,
 {
     let mut buf = BytesMut::with_capacity(4096);
@@ -111,7 +122,7 @@ where
             handler(v).await;
         } else {
             // End of stream
-            return Ok(())
+            return Ok(());
         }
     }
 }
@@ -121,17 +132,16 @@ mod tests {
 
     use super::*;
     use std::io::Cursor;
-    use tokio::sync::Mutex;
     use std::sync::Arc;
-
+    use tokio::sync::Mutex;
 
     #[tokio::test]
     async fn send_and_receive() {
         // Construct a command
         let topic = "test".into();
-        let value =  Value::from("test");
+        let value = Value::from("test");
         let message = Message { topic, value };
-        let command = Command::Publish{ message };
+        let command = Command::Publish { message };
         let d1 = Datagram::new(command, "sender");
 
         // Send the command
@@ -141,7 +151,10 @@ mod tests {
         // Receive the command
         let mut buffer = BytesMut::new();
         let mut cursor = Cursor::new(stream);
-        let d2 = read_stream(&mut cursor, &mut buffer).await.unwrap().unwrap();
+        let d2 = read_stream(&mut cursor, &mut buffer)
+            .await
+            .unwrap()
+            .unwrap();
 
         // Equality check
         assert_eq!(d1, d2);
@@ -151,8 +164,10 @@ mod tests {
     async fn test_bind_stream() {
         // Construct a command
         let topic = "test".into();
-        let value =  Value::from("test");
-        let sent_command = Command::Publish{ message: Message { topic, value } };
+        let value = Value::from("test");
+        let sent_command = Command::Publish {
+            message: Message { topic, value },
+        };
         let datagram = Datagram::new(sent_command, "source");
 
         // Send the command
@@ -165,7 +180,9 @@ mod tests {
         let mut cursor = Cursor::new(stream);
         bind_stream(&mut cursor, |_: Datagram| async {
             *c1.lock().await += 1;
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
 
         // Equality check
         assert_eq!(*c.lock().await, 1);
