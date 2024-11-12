@@ -3,7 +3,7 @@ use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::TcpStream;
 
 use crate::config;
-use crate::datagram::{Message, MessageReader, MessageWriter};
+use crate::datagram;
 use rmpv::Value;
 
 use tokio::sync::mpsc;
@@ -15,8 +15,8 @@ use tokio;
 
 /// A client connection to a pub/sub server.
 pub struct Client {
-    tx: Sender<Message>,
-    rx: Option<Receiver<Message>>,
+    tx: Sender<datagram::Command>,
+    rx: Option<Receiver<datagram::Message>>,
     addr: String,
     client_id: String,
 }
@@ -31,11 +31,21 @@ impl Clone for Client {
     }
 }
 impl Client {
+    async fn send_command(&self, command: datagram::Command) {
+        self.tx
+            .send(command)
+            .await
+            .expect("datagram::Command was sent")
+    }
+
     /// Publish a message to the server
     pub async fn publish(&self, topic: &str, value: Value) {
-        // debug!("Publish {} {}", topic, value);
-        let message = Message::new(topic, value, &self.client_id);
-        self.tx.send(message).await.expect("Message was sent")
+        let message = datagram::Message {
+            topic: topic.to_string(),
+            value,
+        };
+        let command = datagram::Command::Publish { message };
+        self.send_command(command).await;
     }
 
     /// Handy util for timing out an opteration that would otherwise block forever
@@ -53,13 +63,16 @@ impl Client {
 
     /// Receive a message from the server
     ///
-    /// Returns a Message, or None when the connection has closed or timeout has
+    /// Returns a datagram::Command, or None when the connection has closed or timeout has
     /// been reached
-    pub async fn recv(&mut self, timeout: Option<tokio::time::Duration>) -> Option<Message> {
+    pub async fn recv(
+        &mut self,
+        timeout: Option<tokio::time::Duration>,
+    ) -> Option<datagram::Message> {
         if self.rx.is_some() {
             tokio::select! {
                 message = self.rx.as_mut().unwrap().recv() => {
-                    Some(message.expect("Message can be decoded"))
+                    message
                 },
                 _ = Self::optional_timeout(timeout) => {
                     None
@@ -73,17 +86,12 @@ impl Client {
 
     async fn receive_loop(
         stream: OwnedReadHalf,
-        tx: Sender<Message>,
+        tx: Sender<datagram::Message>,
     ) -> Result<(), Box<dyn Error>> {
-        let mut reader = MessageReader::new(stream);
-        loop {
-            let message = reader.read_value().await?;
-            if let Some(m) = message {
-                tx.send(m).await?;
-            } else {
-                return Ok(());
-            }
-        }
+        datagram::bind_stream(stream, |message: datagram::Message| async {
+            tx.send(message).await.expect("Ok")
+        })
+        .await
     }
 
     /// Subscribe to messages on topics matching the specified pattern
@@ -94,18 +102,10 @@ impl Client {
     /// and are excluded in wildcard matches. To subscribe to all system messages,
     /// create a new subscription with the following pattern: `!`
     pub async fn subscribe(&self, pattern: &str) {
-        let topic = format!("{}{}", config::SYSTEM_TOPIC_PREFIX, config::SUBSCRIBE_TOPIC);
-        self.publish(&topic, Value::from(pattern)).await;
-    }
-
-    async fn set_client_id(&self) {
-        let topic = format!(
-            "{}{}",
-            config::SYSTEM_TOPIC_PREFIX,
-            config::SET_CLIENT_ID_TOPIC
-        );
-        self.publish(&topic, Value::from(self.client_id.clone()))
-            .await;
+        let command = datagram::Command::Subscribe {
+            pattern: pattern.to_string(),
+        };
+        self.send_command(command).await;
     }
 
     /// Create a new client
@@ -118,16 +118,18 @@ impl Client {
         match resp {
             Ok(stream) => {
                 info!("Connected: {}", &addr);
-                let (r, w) = stream.into_split();
+                let (r, mut w) = stream.into_split();
                 let (tx, rx) = mpsc::channel(config::CHANNEL_BUFFER_SIZE);
                 tokio::spawn(async move {
                     _ = Client::receive_loop(r, tx).await.unwrap();
                 });
-                let (wtx, mut wrx) = mpsc::channel(config::CHANNEL_BUFFER_SIZE);
-                let mut writer = MessageWriter::new(w);
+                let (wtx, mut wrx) =
+                    mpsc::channel::<datagram::Command>(config::CHANNEL_BUFFER_SIZE);
+                let client_id_clone = client_id.clone();
                 tokio::spawn(async move {
-                    while let Some(message) = wrx.recv().await {
-                        writer.send(message).await.unwrap();
+                    while let Some(cmd) = wrx.recv().await {
+                        let datagram = datagram::Datagram::new(cmd, &client_id_clone);
+                        datagram::send_rmp_value(&mut w, datagram).await.unwrap();
                     }
                 });
                 let client = Client {
@@ -136,7 +138,6 @@ impl Client {
                     addr,
                     client_id,
                 };
-                client.set_client_id().await;
                 client
             }
             Err(e) => {

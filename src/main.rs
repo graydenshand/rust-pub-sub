@@ -73,26 +73,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             let client_clone = client.clone();
             let write_future = tokio::spawn(async move {
+                let mut i = 0;
                 loop {
-                    client_clone
-                        .publish("test", Value::from("Publishing from a separate task"))
-                        .await;
-                    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                    client_clone.publish("test", Value::from(i)).await;
+                    i += 1;
                 }
             });
 
             // Event handlers
             let read_future = tokio::spawn(async move {
+                let mut i = 0;
                 while let Some(message) = client.recv(None).await {
-                    let topic = message.topic();
-                    let value = message.value().to_string();
-                    debug!("Message received - {topic} - {value}");
+                    if i % 10_000 == 0 {
+                        let topic = message.topic;
+                        let value = message.value.to_string();
+                        debug!("Message received - {topic} - {value}");
+                    };
+                    i += 1;
                 }
+                panic!("Unexpectedly stopped receiving messages.")
             });
 
-            let (r, w) = tokio::join!(read_future, write_future);
-            r.unwrap();
-            w.unwrap();
+            tokio::select!(
+                _ = read_future => {
+                    panic!("Stopped receiving messages")
+                },
+                _ = write_future => {
+                    panic!("Stopped sending messages")
+                }
+            );
         }
         None => {}
     };

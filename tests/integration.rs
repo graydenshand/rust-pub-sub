@@ -21,7 +21,7 @@ async fn it_publishes_and_receives_messages() {
     });
 
     // Give server 500ms to start, then initialize a client
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
     let mut client = rps::client::Client::new(format!("127.0.0.1:{port}"), "test".into()).await;
 
     // Subscribe to all messages
@@ -30,7 +30,7 @@ async fn it_publishes_and_receives_messages() {
     // Spawn a task to listen for messages
     //
     // The task will receive messages until all messages are accounted for, or
-    // until there have been no new messages received in 500ms
+    // until there have been no new messages received in the specified interval
     let client_clone = client.clone();
     let n_messages = messages.len();
     let read_future = tokio::spawn(async move {
@@ -41,12 +41,15 @@ async fn it_publishes_and_receives_messages() {
             .await
         {
             received_messages.push(message);
-            if received_messages.len() >= n_messages + 1 {
+            if received_messages.len() >= n_messages {
                 break;
             }
         }
         received_messages
     });
+
+    // Give message receiver time to spin up
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
     // Publish each of the messages defined above
     let messages_clone = messages.clone();
@@ -59,12 +62,7 @@ async fn it_publishes_and_receives_messages() {
 
     // Verify messages received matches messages sent
     for i in 0..messages.len() {
-        assert_eq!(
-            messages[i],
-            (
-                received_messages[i].topic(),
-                received_messages[i].value().to_owned()
-            )
-        );
+        assert_eq!(messages[i].0, received_messages[i].topic);
+        assert_eq!(messages[i].1, received_messages[i].value);
     }
 }
