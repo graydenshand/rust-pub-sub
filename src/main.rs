@@ -90,7 +90,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         debug!("Message received - {topic} - {value}");
                     };
                     i += 1;
-                };
+                }
                 panic!("Unexpectedly stopped receiving messages.")
             });
 

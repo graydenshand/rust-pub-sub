@@ -25,25 +25,15 @@ pub enum Command {
     Publish { message: Message },
     /// Subscribe to a topic
     Subscribe { pattern: String },
-    /// Set the client id for this session
-    SetClientId { id: String },
 }
 impl fmt::Display for Command {
-    // This trait requires `fmt` with this exact signature.
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // Write strictly the first element into the supplied output
-        // stream: `f`. Returns `fmt::Result` which indicates whether the
-        // operation succeeded or failed. Note that `write!` uses syntax which
-        // is very similar to `println!`.
         match self {
             Self::Publish { message } => {
                 write!(f, "PUBLISH - {} - {:?}", message.topic, message.value)
             }
             Self::Subscribe { pattern } => {
                 write!(f, "SUBSCRIBE - {pattern}")
-            }
-            Self::SetClientId { id } => {
-                write!(f, "SET CLIENT ID - {id}")
             }
         }
     }

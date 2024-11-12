@@ -108,13 +108,6 @@ impl Client {
         self.send_command(command).await;
     }
 
-    async fn set_client_id(&self) {
-        let command = datagram::Command::SetClientId {
-            id: self.client_id.to_string(),
-        };
-        self.send_command(command).await;
-    }
-
     /// Create a new client
     ///
     /// Args:
@@ -145,7 +138,6 @@ impl Client {
                     addr,
                     client_id,
                 };
-                client.set_client_id().await;
                 client
             }
             Err(e) => {

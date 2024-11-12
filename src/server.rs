@@ -36,15 +36,13 @@ impl Clone for Channel {
 
 struct DatagramProcessor {
     subscriptions: glob_tree::GlobTree,
-    client_id: Arc<Mutex<String>>,
     stream: OwnedWriteHalf,
 }
 impl DatagramProcessor {
-    fn new(stream: OwnedWriteHalf, client_id: Arc<Mutex<String>>) -> Self {
+    fn new(stream: OwnedWriteHalf) -> Self {
         Self {
             subscriptions: glob_tree::GlobTree::new(),
             stream,
-            client_id,
         }
     }
 
@@ -64,15 +62,16 @@ impl DatagramProcessor {
                     }
                 },
                 command = conn_channel_receiver.recv() => {
-                    match command.unwrap() {
-                        Command::Subscribe { pattern } => {
-                            self.subscriptions.insert(&pattern);
-                        },
-                        _ => ()
+                    if let Some(c) = command {
+                        match c {
+                            Command::Subscribe { pattern } => {
+                                self.subscriptions.insert(&pattern);
+                            },
+                            _ => ()
+                        }
                     }
                 }
             }
-            
         }
     }
 }
@@ -82,8 +81,8 @@ struct Connection {
 }
 impl Connection {
     fn open(stream: tokio::net::TcpStream, channel: Channel) {
-        let client_id = Arc::new(Mutex::new(Uuid::new_v4().to_string()));
-        info!("{} - CONNECT", client_id.lock().unwrap());
+        let client_id = Uuid::new_v4().to_string();
+        info!("{} - CONNECT", client_id);
 
         // A channel for the reader to forward messages directly to the writer
         let conn_channel = mpsc::channel::<Command>(config::CHANNEL_BUFFER_SIZE);
@@ -101,7 +100,7 @@ impl Connection {
         // Launch the loop that listens for messages from other clients
         let message_channel_receiver = channel.tx.subscribe();
         tokio::spawn(async {
-            Connection::send(w, message_channel_receiver, client_id, conn_channel.1).await;
+            Connection::send(w, message_channel_receiver, conn_channel.1).await;
         });
     }
 
@@ -109,8 +108,8 @@ impl Connection {
     async fn recv(
         stream: OwnedReadHalf,
         message_channel_sender: broadcast::Sender<Message>,
-        client_id: Arc<Mutex<String>>,
-        conn_channel_sender: mpsc::Sender<Command>
+        client_id: String,
+        conn_channel_sender: mpsc::Sender<Command>,
     ) {
         bind_stream(stream, |datagram: Datagram| async {
             {
@@ -118,11 +117,11 @@ impl Connection {
                 // debug!("{} - {}", c, datagram.command);
             }
             match datagram.command {
-                Command::SetClientId { id } => {
-                    *client_id.lock().unwrap() = id.to_string();
-                }
                 Command::Subscribe { pattern: _ } => {
-                    conn_channel_sender.send(datagram.command.clone()).await.unwrap();
+                    conn_channel_sender
+                        .send(datagram.command.clone())
+                        .await
+                        .unwrap();
                 }
                 Command::Publish { message } => {
                     message_channel_sender.send(message).unwrap();
@@ -131,19 +130,17 @@ impl Connection {
         })
         .await
         .unwrap();
-        info!("{} - DISCONNECT", client_id.lock().unwrap());
+        info!("{} - DISCONNECT", client_id);
     }
 
     /// Bind a DatagramProcessor to the broadcast channel and listen for messages
     async fn send(
         stream: OwnedWriteHalf,
         rx: broadcast::Receiver<Message>,
-        client_id: Arc<Mutex<String>>,
         conn_channel_receiver: mpsc::Receiver<Command>,
     ) {
         tokio::spawn(async {
-            let mut message_processor: DatagramProcessor =
-                DatagramProcessor::new(stream, client_id);
+            let mut message_processor: DatagramProcessor = DatagramProcessor::new(stream);
             message_processor
                 .bind_to_channels(rx, conn_channel_receiver)
                 .await
