@@ -58,7 +58,7 @@ impl DatagramProcessor {
                     // Check if published message is in this client's subscriptions before sending
                     let m = message.expect("Received message from channel");
                     if self.subscriptions.check(&m.topic) {
-                        send_rmp_value(&mut self.stream, m).await.unwrap();
+                        send_rmp_value(&mut self.stream, m).await?;
                     }
                 },
                 command = conn_channel_receiver.recv() => {
@@ -94,7 +94,9 @@ impl Connection {
         let message_channel_sender = channel.tx.clone();
         let client_id_clone = client_id.clone();
         tokio::spawn(async {
-            Connection::recv(r, message_channel_sender, client_id_clone, conn_channel.0).await;
+            Connection::recv(r, message_channel_sender, client_id_clone, conn_channel.0)
+                .await
+                .unwrap();
         });
 
         // Launch the loop that listens for messages from other clients
@@ -110,12 +112,9 @@ impl Connection {
         message_channel_sender: broadcast::Sender<Message>,
         client_id: String,
         conn_channel_sender: mpsc::Sender<Command>,
-    ) {
-        bind_stream(stream, |datagram: Datagram| async {
-            {
-                // let c = client_id.lock().unwrap();
-                // debug!("{} - {}", c, datagram.command);
-            }
+    ) -> Result<(), Box<dyn Error>> {
+        let r = bind_stream(stream, |datagram: Datagram| async {
+            debug!("{} - {}", client_id, datagram.command);
             match datagram.command {
                 Command::Subscribe { pattern: _ } => {
                     conn_channel_sender
@@ -128,9 +127,12 @@ impl Connection {
                 }
             };
         })
-        .await
-        .unwrap();
+        .await;
+        if r.is_err() {
+            debug!("{} - {:?}", client_id, r.err());
+        }
         info!("{} - DISCONNECT", client_id);
+        Ok(())
     }
 
     /// Bind a DatagramProcessor to the broadcast channel and listen for messages
