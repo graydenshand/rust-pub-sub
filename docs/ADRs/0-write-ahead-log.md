@@ -1,6 +1,8 @@
 # 0. Write Ahead Log
 
-Status: draft
+Status: rejected
+
+> rejected for performance concerns
 
 ## Overview
 

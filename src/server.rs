@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 use crate::config;
 use crate::datagram::{bind_stream, send_rmp_value, Command, Datagram, Message};
 use crate::glob_tree::{self};
+use crate::metrics;
 
 #[derive(Debug)]
 struct Channel {
@@ -56,7 +57,12 @@ impl DatagramProcessor {
             tokio::select! {
                 message = message_channel_receiver.recv() => {
                     // Check if published message is in this client's subscriptions before sending
+                    if message.is_err() {
+                        debug!("{:?}", message.err());
+                        continue
+                    }
                     let m = message.expect("Received message from channel");
+
                     if self.subscriptions.check(&m.topic) {
                         send_rmp_value(&mut self.stream, m).await?;
                     }
@@ -80,7 +86,11 @@ struct Connection {
     client_id: Arc<Mutex<String>>,
 }
 impl Connection {
-    fn open(stream: tokio::net::TcpStream, channel: Channel) {
+    fn open(
+        stream: tokio::net::TcpStream,
+        channel: Channel,
+        command_counter: metrics::CounterMutator,
+    ) {
         let client_id = Uuid::new_v4().to_string();
         info!("{} - CONNECT", client_id);
 
@@ -94,9 +104,15 @@ impl Connection {
         let message_channel_sender = channel.tx.clone();
         let client_id_clone = client_id.clone();
         tokio::spawn(async {
-            Connection::recv(r, message_channel_sender, client_id_clone, conn_channel.0)
-                .await
-                .unwrap();
+            Connection::recv(
+                r,
+                message_channel_sender,
+                client_id_clone,
+                conn_channel.0,
+                command_counter,
+            )
+            .await
+            .unwrap();
         });
 
         // Launch the loop that listens for messages from other clients
@@ -112,9 +128,11 @@ impl Connection {
         message_channel_sender: broadcast::Sender<Message>,
         client_id: String,
         conn_channel_sender: mpsc::Sender<Command>,
+        command_counter: metrics::CounterMutator,
     ) -> Result<(), Box<dyn Error>> {
         let r = bind_stream(stream, |datagram: Datagram| async {
             debug!("{} - {}", client_id, datagram.command);
+            command_counter.increment().await;
             match datagram.command {
                 Command::Subscribe { pattern: _ } => {
                     conn_channel_sender
@@ -172,11 +190,36 @@ impl Server {
     pub async fn run(&mut self) -> Result<(), Box<dyn Error>> {
         let listener = TcpListener::bind(format!("0.0.0.0:{}", self.port)).await?;
 
+        // Create a metric to count the number of commands processed by the server
+        let mut command_counter = metrics::Counter::new();
+        let command_counter_mutator = command_counter.get_mutator();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    // Listen for mutations from connections
+                    result = command_counter.listen() => {
+                        result.unwrap()
+                    }
+                    // Wake up periodically to log metrics
+                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(config::COMMAND_COUNTER_INTERVAL_S)) => {
+                        // Log the count and calculated rate
+                        info!("Commands processed: {} - Rate: {:.2}/s", command_counter.value(), command_counter.rate().unwrap());
+                        // Reset the counter
+                        command_counter.reset();
+                    }
+                }
+            }
+        });
+
         loop {
             // Accept a new connection
             let (stream, _) = listener.accept().await?;
 
-            Connection::open(stream, self.channel.clone());
+            Connection::open(
+                stream,
+                self.channel.clone(),
+                command_counter_mutator.clone(),
+            );
         }
     }
 }
