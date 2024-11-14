@@ -1,4 +1,12 @@
+// Size of all channel buffers
 pub const CHANNEL_BUFFER_SIZE: usize = 100_000;
+
+// Character used as wildcard in subscription patterns
 pub const WILDCARD: char = '*';
-pub const COMMAND_COUNTER_INTERVAL_S: u64 = 10;
+
+// System published topics will use this prefix
 pub const SYSTEM_TOPIC_PREFIX: &'static str = "!system";
+
+// Metric reporting intervals
+pub const M_COMMANDS_INTERVAL_S: u64 = 10;
+pub const M_CONNECTIONS_INTERVAL_S: u64 = 10;
