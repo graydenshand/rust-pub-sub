@@ -9,6 +9,7 @@ use tokio::sync::broadcast;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
+use rmpv::Value;
 
 use crate::config;
 use crate::datagram::{bind_stream, send_rmp_value, Command, Datagram, Message};
@@ -193,6 +194,7 @@ impl Server {
         // Create a metric to count the number of commands processed by the server
         let mut command_counter = metrics::Counter::new();
         let command_counter_mutator = command_counter.get_mutator();
+        let message_sender = self.channel.tx.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -204,6 +206,17 @@ impl Server {
                     _ = tokio::time::sleep(tokio::time::Duration::from_secs(config::COMMAND_COUNTER_INTERVAL_S)) => {
                         // Log the count and calculated rate
                         info!("Commands processed: {} - Rate: {:.2}/s", command_counter.value(), command_counter.rate().unwrap());
+                        // Broadcast the count and calculated rate
+                        let m1 = Message {
+                            topic: format!("{}/metrics/commands", config::SYSTEM_TOPIC_PREFIX),
+                            value: Value::from(command_counter.value().clone()) 
+                        };
+                        message_sender.send(m1).expect("Message is sent");
+                        let m2 = Message { 
+                            topic: format!("{}/metrics/commands-per-second", config::SYSTEM_TOPIC_PREFIX), 
+                            value: Value::from(command_counter.rate().unwrap().clone()) 
+                        };
+                        message_sender.send(m2).expect("Message is sent");
                         // Reset the counter
                         command_counter.reset();
                     }
