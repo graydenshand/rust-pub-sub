@@ -108,6 +108,16 @@ impl Client {
         self.send_command(command).await;
     }
 
+    /// Unsubscribe from messages on topics matching the specified pattern
+    ///
+    /// See `subscribe` method for detail on patterns.
+    pub async fn unsubscribe(&self, pattern: &str) {
+        let command = datagram::Command::Unsubscribe {
+            pattern: pattern.to_string(),
+        };
+        self.send_command(command).await;
+    }
+
     /// Create a new client
     ///
     /// Args:

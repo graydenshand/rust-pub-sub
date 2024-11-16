@@ -25,6 +25,8 @@ pub enum Command {
     Publish { message: Message },
     /// Subscribe to a topic
     Subscribe { pattern: String },
+    /// Subscribe to a topic
+    Unsubscribe { pattern: String },
 }
 impl fmt::Display for Command {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -34,6 +36,9 @@ impl fmt::Display for Command {
             }
             Self::Subscribe { pattern } => {
                 write!(f, "SUBSCRIBE - {pattern}")
+            }
+            Self::Unsubscribe { pattern } => {
+                write!(f, "UNSUBSCRIBE - {pattern}")
             }
         }
     }

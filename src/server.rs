@@ -7,7 +7,6 @@ use tokio;
 use tokio::sync::broadcast;
 
 use rmpv::Value;
-use serde::{Deserialize, Serialize};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
@@ -74,6 +73,12 @@ impl DatagramProcessor {
                         match c {
                             Command::Subscribe { pattern } => {
                                 self.subscriptions.insert(&pattern);
+                            },
+                            Command::Unsubscribe { pattern } => {
+                                match self.subscriptions.remove(&pattern) {
+                                    Ok(_) => (),
+                                    Err(e) => {warn!("{}", e)}
+                                };
                             },
                             _ => ()
                         }
@@ -149,6 +154,12 @@ impl Connection {
                             .await
                             .unwrap();
                     }
+                    Command::Unsubscribe { pattern: _ } => {
+                        conn_channel_sender
+                            .send(datagram.command.clone())
+                            .await
+                            .unwrap();
+                    }
                     Command::Publish { message } => {
                         message_channel_sender.send(message).unwrap();
                     }
@@ -216,8 +227,6 @@ impl Server {
         let mut command_throughput = metrics::Throughput::new();
         let command_throughput_mutator = command_throughput.get_mutator();
         let message_sender = self.channel.tx.clone();
-        let mut connection_count = metrics::Count::new();
-        let connection_count_mutator = connection_count.get_mutator();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -242,6 +251,8 @@ impl Server {
         });
 
         // Connections metric
+        let mut connection_count = metrics::Count::new();
+        let connection_count_mutator = connection_count.get_mutator();
         let message_sender = self.channel.tx.clone();
         tokio::spawn(async move {
             loop {
