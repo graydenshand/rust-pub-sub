@@ -23,11 +23,12 @@ Work in progress.
 ### Roadmap
 
 - Extensible server class (e.g. custom handlers)
-- Unsubscribe function on client
 - Robust error handling (retries & graceful failures)
     - Server disconnect, client retry logic
 - Python bindings
 - TLS/SSL
 - Authentication
 - History/Replay server for processing historical data
-- Archive data format (iceberg table)
+- Archive data (iceberg table)
+- Websocket stream
+- UDP stream
