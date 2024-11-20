@@ -12,9 +12,12 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
 use crate::config;
-use crate::datagram::{bind_stream, send_rmp_value, Command, Datagram, Message};
+use crate::datagram::{Command, Datagram, Message, MsgPackCodec};
 use crate::glob_tree::{self};
 use crate::metrics;
+use futures::sink::SinkExt;
+use tokio_stream::StreamExt;
+use tokio_util::codec::{FramedRead, FramedWrite};
 
 #[derive(Debug)]
 struct Channel {
@@ -38,13 +41,13 @@ impl Clone for Channel {
 
 struct DatagramProcessor {
     subscriptions: glob_tree::GlobTree,
-    stream: OwnedWriteHalf,
+    writer: FramedWrite<OwnedWriteHalf, MsgPackCodec<Message>>,
 }
 impl DatagramProcessor {
-    fn new(stream: OwnedWriteHalf) -> Self {
+    fn new(writer: FramedWrite<OwnedWriteHalf, MsgPackCodec<Message>>) -> Self {
         Self {
             subscriptions: glob_tree::GlobTree::new(),
-            stream,
+            writer,
         }
     }
 
@@ -65,7 +68,7 @@ impl DatagramProcessor {
                     let m = message.expect("Received message from channel");
 
                     if self.subscriptions.check(&m.topic) {
-                        send_rmp_value(&mut self.stream, m).await?;
+                        self.writer.send(m).await.expect("Message is sent to client");
                     }
                 },
                 command = conn_channel_receiver.recv() => {
@@ -141,33 +144,28 @@ impl Connection {
         connection_count: metrics::CountMutator,
     ) -> Result<(), Box<dyn Error>> {
         connection_count.add(1).await;
-        {
-            // Why the outer braces? https://users.rust-lang.org/t/future-send-and-holding-a-mutexguard-for-a-short-time-not-across-a-yield/82428
-            // Avoids an error: "future is not `Send` as this value is used across an await"
-            let r = bind_stream(stream, |datagram: Datagram| async {
-                debug!("{} - {}", client_id, datagram.command);
-                command_throughput.increment().await;
-                match datagram.command {
-                    Command::Subscribe { pattern: _ } => {
-                        conn_channel_sender
-                            .send(datagram.command.clone())
-                            .await
-                            .unwrap();
-                    }
-                    Command::Unsubscribe { pattern: _ } => {
-                        conn_channel_sender
-                            .send(datagram.command.clone())
-                            .await
-                            .unwrap();
-                    }
-                    Command::Publish { message } => {
-                        message_channel_sender.send(message).unwrap();
-                    }
-                };
-            })
-            .await;
-            if r.is_err() {
-                debug!("{} - {:?}", client_id, r.err());
+        let codec = MsgPackCodec::<Datagram>::new();
+        let mut reader = FramedRead::new(stream, codec);
+        while let Some(datagram) = reader.next().await {
+            match datagram {
+                Ok(dg) => {
+                    debug!("{} - {}", client_id, dg.command);
+                    command_throughput.increment().await;
+                    match dg.command {
+                        Command::Subscribe { pattern: _ } => {
+                            conn_channel_sender.send(dg.command.clone()).await.unwrap();
+                        }
+                        Command::Unsubscribe { pattern: _ } => {
+                            conn_channel_sender.send(dg.command.clone()).await.unwrap();
+                        }
+                        Command::Publish { message } => {
+                            message_channel_sender.send(message).unwrap();
+                        }
+                    };
+                }
+                Err(e) => {
+                    warn!("{:?}", e);
+                }
             }
         }
         connection_count.subtract(1).await;
@@ -182,7 +180,9 @@ impl Connection {
         conn_channel_receiver: mpsc::Receiver<Command>,
     ) {
         tokio::spawn(async {
-            let mut message_processor: DatagramProcessor = DatagramProcessor::new(stream);
+            let message_codec = MsgPackCodec::<Message>::new();
+            let writer = FramedWrite::new(stream, message_codec);
+            let mut message_processor: DatagramProcessor = DatagramProcessor::new(writer);
             let _ = message_processor
                 .bind_to_channels(rx, conn_channel_receiver)
                 .await;

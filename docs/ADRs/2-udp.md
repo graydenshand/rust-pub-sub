@@ -13,3 +13,8 @@ Allowing the server to support both protocols allows users to decide what makes 
 UDP supports multicast which reduces the IO cost of sending a message to a group of N clients from O(N) to O(1).
 - "High throughput topics" -- Special topics with a dedicated UDP multicast address.
 
+## Implementation
+
+The server must bind a UDP Socket to an unoccupied port - i.e. a different port from the tcp listener.
+
+With UDP, there is no notification when the client disconnects.

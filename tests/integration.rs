@@ -31,7 +31,7 @@ fn capture(
             }
         }
         // Give message receiver time to spin up
-        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         received_messages
     })
 }
@@ -78,6 +78,7 @@ async fn it_publishes_and_receives_messages() {
     let mut received_messages = read_future.await.unwrap();
 
     // Verify messages received matches messages sent
+    assert_eq!(messages.len(), received_messages.len());
     for i in 0..messages.len() {
         assert_eq!(messages[i].0, received_messages[i].topic);
         assert_eq!(messages[i].1, received_messages[i].value);

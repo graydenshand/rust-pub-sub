@@ -8,8 +8,11 @@ use rmpv::Value;
 
 use tokio::sync::mpsc;
 
+use futures::sink::SinkExt;
+use futures::stream::StreamExt;
 use std::error::Error;
 use tokio::sync::mpsc::{Receiver, Sender};
+use tokio_util::codec::{FramedRead, FramedWrite};
 
 use tokio;
 
@@ -84,16 +87,6 @@ impl Client {
         }
     }
 
-    async fn receive_loop(
-        stream: OwnedReadHalf,
-        tx: Sender<datagram::Message>,
-    ) -> Result<(), Box<dyn Error>> {
-        datagram::bind_stream(stream, |message: datagram::Message| async {
-            tx.send(message).await.expect("Ok")
-        })
-        .await
-    }
-
     /// Subscribe to messages on topics matching the specified pattern
     ///
     /// Patterns can contain glob style wildcards: `*``
@@ -128,10 +121,23 @@ impl Client {
         match resp {
             Ok(stream) => {
                 info!("Connected: {}", &addr);
-                let (r, mut w) = stream.into_split();
+                // Split stream into read and write halves
+                let (r, w) = stream.into_split();
+                let datagram_codec = datagram::MsgPackCodec::<datagram::Datagram>::new();
+                let mut writer = FramedWrite::new(w, datagram_codec);
+                let message_codec = datagram::MsgPackCodec::<datagram::Message>::new();
+                let mut reader = FramedRead::new(r, message_codec);
                 let (tx, rx) = mpsc::channel(config::CHANNEL_BUFFER_SIZE);
                 tokio::spawn(async move {
-                    _ = Client::receive_loop(r, tx).await.unwrap();
+                    while let Some(m) = reader.next().await {
+                        match m {
+                            Ok(message) => tx
+                                .send(message)
+                                .await
+                                .expect("Message failed to send over channel"),
+                            Err(e) => panic!("Error {}", e),
+                        }
+                    }
                 });
                 let (wtx, mut wrx) =
                     mpsc::channel::<datagram::Command>(config::CHANNEL_BUFFER_SIZE);
@@ -139,7 +145,10 @@ impl Client {
                 tokio::spawn(async move {
                     while let Some(cmd) = wrx.recv().await {
                         let datagram = datagram::Datagram::new(cmd, &client_id_clone);
-                        datagram::send_rmp_value(&mut w, datagram).await.unwrap();
+                        writer
+                            .send(datagram)
+                            .await
+                            .expect("Command was sent to server");
                     }
                 });
                 let client = Client {
