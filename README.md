@@ -1,35 +1,22 @@
-# Project
+# Momo
 
-A TCP Pub/Sub server & client, using msgpack.
+A TCP Pub/Sub server & client, with a lightweight protocol over msgpack.
 
 ## Priorities
 
-- Performant
-    - Low latency of messages from publisher to subscriber
-    - High throughput (messages sent & received) of server & client
-    - Large network
-        - Many Producers
-        - Many Subscribers
-        - Many Subscriptions
-    - Efficient resource utilization (cpu & memory)
-- Usable
-    - Clear Interface
-    - Portable / Open
-    - Convenient
+- Flexible: Using a flexible, self describing protocol supports a flexible and versitile message broker
+- Performant: Async client and server, compressed data over wire to efficiently use network IO
+- Usable: Simple, minimal interface, open protocol supports integration with other systems
+
 ## Status
 
 Work in progress.
 
 ### Roadmap
 
-- Thread based (not async) client
-- Extensible server class (e.g. custom handlers)
-- Robust error handling (retries & graceful failures)
-    - Server disconnect, client retry logic
+Security
+- TLS & Authentication
+
+Client Usability
 - Python bindings
-- TLS/SSL
-- Authentication
-- History/Replay server for processing historical data
-- Archive data (iceberg table)
-- Websocket stream
-- UDP stream
+- Thread based (not async) client

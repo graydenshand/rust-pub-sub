@@ -6,12 +6,12 @@ use clap::{Parser, Subcommand};
 
 use env_logger;
 use log::info;
-use pub_sub::config;
+use g_pubsub::config;
 use std::error::Error;
 use tokio;
 
-use pub_sub::client::{test_client, Client};
-use pub_sub::server::Server;
+use g_pubsub::client::{test_client, Client};
+use g_pubsub::server::Server;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

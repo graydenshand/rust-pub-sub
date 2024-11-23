@@ -1,9 +1,10 @@
 [package]
-name = "pub_sub"
+name = "g-pubsub"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+tonic = "0.11"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "time", "fs"] }
 serde = { version = "1.0.203", features = ["derive"] }
 rmp = "0.8.14"
@@ -18,10 +19,13 @@ uuid = { version = "1.10.0", features = ["v4"] }
 env_logger = "0.11.5"
 tokio-util = { version = "0.7.12", features = ["net", "codec"] }
 tokio-stream = "0.1.16"
-glob_tree = { path = "../glob_tree" }
+glob-tree = { path = "../glob_tree" }
 
 [dev-dependencies]
 criterion = { version = "0.3", features = ["async_tokio"] }
+
+[build-dependencies]
+tonic-build = "0.11"
 
 [[bench]]
 name = "udp_vs_tcp"

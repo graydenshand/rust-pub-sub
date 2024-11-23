@@ -2,5 +2,5 @@
 
 members = [
     "glob_tree",
-    "pub_sub",
+    "g_pubsub",
 ]
