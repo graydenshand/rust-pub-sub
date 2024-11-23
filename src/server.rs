@@ -35,22 +35,23 @@ impl CommandProcessor {
         &mut self,
         mut message_channel_receiver: broadcast::Receiver<Message>,
         mut conn_channel_receiver: mpsc::Receiver<Command>,
-        messages_sent: metrics::ThroughputMutator,
+        metrics_mutator: MetricsMutator,
     ) -> Result<(), Box<dyn Error>> {
         loop {
             tokio::select! {
                 message = message_channel_receiver.recv() => {
-                    // Check if published message is in this client's subscriptions before sending
                     if message.is_err() {
-                        debug!("{:?}", message.err());
+                        debug!("{}", message.err().unwrap());
                         continue
                     }
                     let m = message?;
 
+                    // Check if published message is in this client's subscriptions before sending
                     if self.subscriptions.check(&m.topic) {
-                        let f1 = messages_sent.increment();
-                        let f2 = self.writer.send(m);
-                        let (_,r2) = tokio::join!(f1, f2);
+                        let (_,r2) = tokio::join!(
+                            metrics_mutator.messages_sent.increment(),
+                            self.writer.send(m)
+                        );
                         r2?
                     }
                 },
@@ -80,9 +81,7 @@ impl Connection {
     fn open(
         stream: tokio::net::TcpStream,
         broadcast_sender: broadcast::Sender<Message>,
-        command_throughput: metrics::ThroughputMutator,
-        connection_count: metrics::CountMutator,
-        messages_sent: metrics::ThroughputMutator,
+        metrics_mutator: MetricsMutator,
     ) {
         let connection_id = Uuid::new_v4().to_string();
         info!("{} - CONNECT", connection_id);
@@ -96,14 +95,14 @@ impl Connection {
         // Launch the loop that listens for messages from this client
         let broadcast_sender_clone = broadcast_sender.clone();
         let connection_id_clone = connection_id.clone();
+        let metrics_mutator_clone = metrics_mutator.clone();
         tokio::spawn(async {
             Connection::recv(
                 r,
                 broadcast_sender_clone,
                 connection_id_clone,
                 conn_channel.0,
-                command_throughput,
-                connection_count,
+                metrics_mutator_clone,
             )
             .await
             .unwrap();
@@ -112,7 +111,7 @@ impl Connection {
         // Launch the loop that listens for messages from other clients
         let message_channel_receiver = broadcast_sender.subscribe();
         tokio::spawn(async {
-            Connection::send(w, message_channel_receiver, conn_channel.1, messages_sent).await;
+            Connection::send(w, message_channel_receiver, conn_channel.1, metrics_mutator).await;
         });
     }
 
@@ -122,17 +121,16 @@ impl Connection {
         broadcast_sender: broadcast::Sender<Message>,
         connection_id: String,
         conn_channel_sender: mpsc::Sender<Command>,
-        command_throughput: metrics::ThroughputMutator,
-        connection_count: metrics::CountMutator,
+        metrics_mutator: MetricsMutator,
     ) -> Result<(), Box<dyn Error>> {
-        connection_count.add(1).await;
+        metrics_mutator.connection_count.add(1).await;
         let codec = MsgPackCodec::<Command>::new();
         let mut reader = FramedRead::new(stream, codec);
         while let Some(result) = reader.next().await {
             match result {
                 Ok(command) => {
                     debug!("{} - {}", connection_id, command);
-                    command_throughput.increment().await;
+                    metrics_mutator.command_throughput.increment().await;
                     match command {
                         Command::Subscribe { pattern: _ } => {
                             conn_channel_sender.send(command.clone()).await.unwrap();
@@ -150,7 +148,7 @@ impl Connection {
                 }
             }
         }
-        connection_count.subtract(1).await;
+        metrics_mutator.connection_count.subtract(1).await;
         info!("{connection_id} - DISCONNECT");
         Ok(())
     }
@@ -160,17 +158,25 @@ impl Connection {
         stream: OwnedWriteHalf,
         receiver: broadcast::Receiver<Message>,
         conn_channel_receiver: mpsc::Receiver<Command>,
-        messages_sent: metrics::ThroughputMutator,
+        metrics_mutator: MetricsMutator,
     ) {
         tokio::spawn(async {
             let message_codec = MsgPackCodec::<Message>::new();
             let writer = FramedWrite::new(stream, message_codec);
             let mut message_processor: CommandProcessor = CommandProcessor::new(writer);
             let _ = message_processor
-                .bind_to_channels(receiver, conn_channel_receiver, messages_sent)
+                .bind_to_channels(receiver, conn_channel_receiver, metrics_mutator)
                 .await;
         });
     }
+}
+
+#[derive(Clone)]
+struct MetricsMutator {
+    /// Metrics
+    command_throughput: metrics::ThroughputMutator,
+    connection_count: metrics::CountMutator,
+    messages_sent: metrics::ThroughputMutator,
 }
 
 /// An async message passing application
@@ -180,7 +186,7 @@ pub struct Server {
     port: u16,
     ///  Writer to broadcast messages to all connection tasks
     broadcast_sender: broadcast::Sender<Message>,
-    ///  Reader from broadcast message channel - not actually used, but the channel will close if there is not at least
+    /// Reader from broadcast message channel - not actually used, but the channel will close if there is not at least
     /// one active reader. To prevent the channel from closing when there are 0 connected clients, we keep a reader
     /// referenced here.
     _broadcast_receiver: broadcast::Receiver<Message>,
@@ -197,85 +203,45 @@ impl Server {
         })
     }
 
-    fn publish_metric<T>(message_sender: &broadcast::Sender<Message>, metric: &str, value: T)
-    where
-        rmpv::Value: From<T>,
-    {
-        // Broadcast the count and calculated rate
-        let m1 = Message {
-            topic: format!("{}/metrics/{metric}", config::SYSTEM_TOPIC_PREFIX),
-            value: Value::from(value.into()),
-        };
-        message_sender
-            .send(m1)
-            .inspect_err(|e| warn!("Failed to public metric - {metric} - {e}"))
-            .ok();
+    fn register_metrics(&self) -> MetricsMutator {
+        // Command throughput
+        let mut command_throughput = metrics::Throughput::new("commands");
+        let command_throughput_mutator = command_throughput.get_mutator();
+        let message_sender = self.broadcast_sender.clone();
+        tokio::spawn(async move {
+            command_throughput
+                .listen_and_broadcast(message_sender)
+                .await;
+        });
+
+        // Connections metric
+        let mut connection_count = metrics::Count::new("connections");
+        let connection_count_mutator = connection_count.get_mutator();
+        let message_sender = self.broadcast_sender.clone();
+        tokio::spawn(async move {
+            connection_count.listen_and_broadcast(message_sender).await;
+        });
+
+        // Messages sent metric
+        let mut messages_sent = metrics::Throughput::new("messages-sent");
+        let message_sender = self.broadcast_sender.clone();
+        let messages_sent_mutator = messages_sent.get_mutator();
+        tokio::spawn(async move {
+            messages_sent.listen_and_broadcast(message_sender).await;
+        });
+
+        MetricsMutator {
+            command_throughput: command_throughput_mutator,
+            connection_count: connection_count_mutator,
+            messages_sent: messages_sent_mutator,
+        }
     }
 
     /// Listen for incoming connections
     pub async fn run(&mut self) -> Result<(), Box<dyn Error>> {
         let listener = TcpListener::bind(format!("0.0.0.0:{}", self.port)).await?;
 
-        // Create metrics
-        let mut command_throughput = metrics::Throughput::new();
-        let command_throughput_mutator = command_throughput.get_mutator();
-        let message_sender = self.broadcast_sender.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    // Listen for mutations from connections
-                    result = command_throughput.listen() => {
-                        result.unwrap()
-                    }
-                    // Wake up periodically to log metrics
-                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(config::M_COMMANDS_INTERVAL_S)) => {
-                        // Broadcast the count and calculated rate
-                        Self::publish_metric(&message_sender, "commands", command_throughput.value().clone());
-                        Self::publish_metric(&message_sender, "commands-per-second", command_throughput.rate());
-
-                        // Reset the metric
-                        command_throughput.reset();
-                    }
-                }
-            }
-        });
-
-        // Connections metric
-        let mut connection_count = metrics::Count::new();
-        let connection_count_mutator = connection_count.get_mutator();
-        let message_sender = self.broadcast_sender.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    result = connection_count.listen() => {
-                        result.unwrap()
-                    }
-                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(config::M_CONNECTIONS_INTERVAL_S)) => {
-                        Self::publish_metric(&message_sender, "connections", connection_count.value().clone());
-                    }
-                }
-            }
-        });
-
-        // Messages sent metric
-        let mut messages_sent = metrics::Throughput::new();
-        let messages_sent_mutator = messages_sent.get_mutator();
-        let message_sender = self.broadcast_sender.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    result = messages_sent.listen() => {
-                        result.unwrap()
-                    }
-                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(config::M_MESSAGES_SENT_INTERVAL_S)) => {
-                        Self::publish_metric(&message_sender, "messages_sent", messages_sent.value().clone());
-                        Self::publish_metric(&message_sender, "messages_sent_per_second", messages_sent.rate().clone());
-                        // Reset the metric
-                        messages_sent.reset();
-                    }
-                }
-            }
-        });
+        let metrics_mutator = self.register_metrics();
 
         loop {
             // Accept a new connection
@@ -284,9 +250,7 @@ impl Server {
             Connection::open(
                 stream,
                 self.broadcast_sender.clone(),
-                command_throughput_mutator.clone(),
-                connection_count_mutator.clone(),
-                messages_sent_mutator.clone(),
+                metrics_mutator.clone(),
             );
         }
     }
