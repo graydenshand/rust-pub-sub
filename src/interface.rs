@@ -41,22 +41,6 @@ impl fmt::Display for Command {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct Datagram {
-    /// The command to execute
-    pub command: Command,
-    /// The sender of the command
-    pub sender: String,
-}
-impl Datagram {
-    pub fn new(command: Command, sender: &str) -> Datagram {
-        Datagram {
-            command,
-            sender: sender.to_string(),
-        }
-    }
-}
-
 /// A Codec for sending and receiving byte-encoded msgpack payloads
 ///
 /// This is intended to produce or consume a stream of type T where T is a type that
@@ -124,16 +108,16 @@ impl<T: Serialize> Encoder<T> for MsgPackCodec<T> {
 mod tests {
 
     use super::*;
+    use futures::sink::SinkExt;
     use std::io::Cursor;
-    use std::sync::Arc;
-    use tokio::sync::Mutex;
+    use tokio_stream::StreamExt;
     use tokio_util::codec::{FramedRead, FramedWrite};
 
     #[tokio::test]
     async fn sends_and_receives() {
         // Create a sink, and wrap with our MsgPackCodec
         let stream = Vec::new();
-        let codec = MsgPackCodec::<Datagram>::new();
+        let codec = MsgPackCodec::<Command>::new();
         let mut writer = FramedWrite::new(stream, codec.clone());
 
         // Send a command
@@ -141,9 +125,8 @@ mod tests {
         let value = Value::from("test");
         let message = Message { topic, value };
         let command = Command::Publish { message };
-        let datagram = Datagram::new(command, "sender");
-        let d1 = datagram.clone();
-        writer.send(datagram).await.unwrap();
+        let c1 = command.clone();
+        writer.send(command).await.unwrap();
 
         // Claim the stream from the writer
         let stream = writer.into_inner();
@@ -153,8 +136,8 @@ mod tests {
             None => panic!("value was null"),
             Some(r) => match r {
                 Err(e) => panic!("value was error - {e}"),
-                Ok(d2) => {
-                    assert_eq!(d1, d2)
+                Ok(c2) => {
+                    assert_eq!(c1, c2)
                 }
             },
         }
@@ -165,7 +148,7 @@ mod tests {
         // Create a stream with some arbitrary bytes
         let stream = vec![12, 120, 27];
         // Stack the MsgPackCodec on top of the stream
-        let codec = MsgPackCodec::<Datagram>::new();
+        let codec = MsgPackCodec::<Command>::new();
         let mut reader = FramedRead::new(Cursor::new(stream), codec);
         // Receive the command
         let v = reader.next().await.unwrap();

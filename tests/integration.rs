@@ -6,7 +6,7 @@ fn capture(
     mut client: rps::client::Client,
     n_messages: usize,
     timeout_interval_ms: u64,
-) -> tokio::task::JoinHandle<Vec<rps::datagram::Message>> {
+) -> tokio::task::JoinHandle<Vec<rps::interface::Message>> {
     // Spawn a task to listen for messages
     //
     // The task will receive messages until all messages are accounted for, or

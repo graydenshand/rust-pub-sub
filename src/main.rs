@@ -44,10 +44,6 @@ enum Commands {
         /// address to send messages to
         #[arg(short, long)]
         address: String,
-
-        /// client_id server will use to trace this session
-        #[arg(short, long, default_value_t = String::from("test-client"))]
-        client_id: String,
     },
 
     /// Log metrics published by the server
@@ -73,12 +69,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let mut server = Server::new(*port).await?;
             server.run().await?;
         }
-        Some(Commands::TestClient { address, client_id }) => {
+        Some(Commands::TestClient { address }) => {
             info!("Running test client...");
-            test_client(address, client_id).await
+            test_client(address).await
         }
         Some(Commands::LogMetrics { address }) => {
-            let mut client = Client::new(address.to_string(), "metrics-logger".into()).await;
+            let mut client = Client::new(address.to_string()).await;
             client
                 .subscribe(&format!("{}/metrics/*", config::SYSTEM_TOPIC_PREFIX))
                 .await;
