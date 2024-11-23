@@ -1,3 +1,5 @@
+//! Safe cross task metrics
+
 use crate::interface::Message;
 use log::warn;
 use rmpv::Value;
@@ -6,6 +8,46 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::time::Instant;
 
 use crate::config;
+
+pub trait Metric {
+    type Mutator;
+    type Value;
+
+    /// Create a new instance of the metric
+    fn new(name: &str, interval: tokio::time::Duration) -> Self;
+
+    /// Listen for updates from associated mutators
+    async fn listen(&mut self) -> Result<(), Box<dyn Error>>;
+
+    /// Broadcast metric to channel
+    fn broadcast(&mut self, message_sender: &broadcast::Sender<Message>);
+
+    /// Interval between broadcasts of this metric
+    fn broadcast_interval(&self) -> tokio::time::Duration;
+
+    /// Listen for updates and broadcast to channel on a set interval
+    async fn listen_and_broadcast(&mut self, message_sender: broadcast::Sender<Message>) {
+        let interval = self.broadcast_interval();
+        loop {
+            tokio::select! {
+                // Listen for mutations from connections
+                result = self.listen() => {
+                    result.unwrap()
+                }
+                // Wake up periodically to log metrics
+                _ = tokio::time::sleep(interval) => {
+                    self.broadcast(&message_sender)
+                }
+            }
+        }
+    }
+
+    /// Get the value of this metric
+    fn value(&self) -> &Self::Value;
+
+    /// Get a mutator for this metric
+    fn get_mutator(&self) -> Self::Mutator;
+}
 
 /// Mutate a Throughput metric
 #[derive(Clone)]
@@ -33,9 +75,14 @@ pub struct Throughput {
     start: Option<Instant>,
     sender: mpsc::Sender<u64>,
     receiver: mpsc::Receiver<u64>,
+    interval: tokio::time::Duration,
 }
-impl Throughput {
-    pub fn new(name: &str) -> Self {
+impl Metric for Throughput {
+    type Mutator = ThroughputMutator;
+    type Value = u64;
+
+    /// Create a new Throughput metric
+    fn new(name: &str, interval: tokio::time::Duration) -> Self {
         let (sender, receiver) = mpsc::channel(config::CHANNEL_BUFFER_SIZE);
         Self {
             name: name.to_string(),
@@ -43,16 +90,24 @@ impl Throughput {
             start: None,
             sender,
             receiver,
+            interval,
         }
     }
 
-    pub fn get_mutator(&self) -> ThroughputMutator {
+    /// Get the value of this metric
+    fn value(&self) -> &Self::Value {
+        &self.value
+    }
+
+    /// Get a ThroughputMutator for this instance
+    fn get_mutator(&self) -> Self::Mutator {
         ThroughputMutator {
             sender: self.sender.clone(),
         }
     }
 
-    pub async fn listen(&mut self) -> Result<(), Box<dyn Error>> {
+    /// Listen for updates
+    async fn listen(&mut self) -> Result<(), Box<dyn Error>> {
         self.start = Some(Instant::now());
         loop {
             let i = self.receiver.recv().await.unwrap();
@@ -60,10 +115,25 @@ impl Throughput {
         }
     }
 
-    pub fn value(&self) -> &u64 {
-        &self.value
+    /// Broadcast metric to channel
+    fn broadcast(&mut self, message_sender: &broadcast::Sender<Message>) {
+        // Report value and rate
+        broadcast_metric(&message_sender, &self.name, self.value().clone());
+        broadcast_metric(
+            &message_sender,
+            &format!("{}-per-second", self.name),
+            self.rate(),
+        );
+        // Reset the metric
+        self.reset();
     }
 
+    /// Interval to wait between broadcasts
+    fn broadcast_interval(&self) -> tokio::time::Duration {
+        self.interval
+    }
+}
+impl Throughput {
     pub fn increment(&mut self, by: u64) {
         self.value += by;
     }
@@ -80,27 +150,6 @@ impl Throughput {
     pub fn reset(&mut self) {
         self.value = 0;
         self.start = Some(Instant::now());
-    }
-
-    /// Listen for messages, and also publish metrics to broadcast channel
-    pub async fn listen_and_broadcast(&mut self, message_sender: broadcast::Sender<Message>) {
-        loop {
-            tokio::select! {
-                // Listen for mutations from connections
-                result = self.listen() => {
-                    result.unwrap()
-                }
-                // Wake up periodically to log metrics
-                _ = tokio::time::sleep(tokio::time::Duration::from_secs(config::M_COMMANDS_INTERVAL_S)) => {
-                    // Broadcast the count and calculated rate
-                    broadcast_metric(&message_sender, &self.name, self.value().clone());
-                    broadcast_metric(&message_sender, &format!("{}-per-second", self.name), self.rate());
-
-                    // Reset the metric
-                    self.reset();
-                }
-            }
-        }
     }
 }
 
@@ -131,25 +180,33 @@ pub struct Count {
     value: u64,
     sender: mpsc::Sender<i64>,
     receiver: mpsc::Receiver<i64>,
+    interval: tokio::time::Duration,
 }
-impl Count {
-    pub fn new(name: &str) -> Self {
+impl Metric for Count {
+    type Mutator = CountMutator;
+    type Value = u64;
+
+    /// Create a new count metric
+    fn new(name: &str, interval: tokio::time::Duration) -> Self {
         let (sender, receiver) = mpsc::channel(config::CHANNEL_BUFFER_SIZE);
         Self {
             name: name.to_string(),
             value: 0,
             sender,
             receiver,
+            interval,
         }
     }
 
-    pub fn get_mutator(&self) -> CountMutator {
+    /// Get a mutator for the metric
+    fn get_mutator(&self) -> Self::Mutator {
         CountMutator {
             sender: self.sender.clone(),
         }
     }
 
-    pub async fn listen(&mut self) -> Result<(), Box<dyn Error>> {
+    /// Listen for updates from mutators
+    async fn listen(&mut self) -> Result<(), Box<dyn Error>> {
         loop {
             let i = self.receiver.recv().await.unwrap();
             if i >= 0 {
@@ -160,34 +217,34 @@ impl Count {
         }
     }
 
-    pub fn value(&self) -> &u64 {
+    /// Get the metric value
+    fn value(&self) -> &u64 {
         &self.value
     }
 
+    /// Broadcast this metric to a channel
+    fn broadcast(&mut self, message_sender: &broadcast::Sender<Message>) {
+        broadcast_metric(&message_sender, &self.name, self.value().clone());
+    }
+
+    /// Interval to wait between broadcasts of this metric
+    fn broadcast_interval(&self) -> tokio::time::Duration {
+        self.interval
+    }
+}
+impl Count {
+    /// Add to the count
     pub fn add(&mut self, n: u64) {
         self.value += n;
     }
 
+    /// Subtract from the count
     pub fn subtract(&mut self, n: u64) {
         self.value -= n;
     }
-
-    pub async fn listen_and_broadcast(&mut self, message_sender: broadcast::Sender<Message>) {
-        loop {
-            tokio::select! {
-                // Listen for mutations from connections
-                result = self.listen() => {
-                    result.unwrap()
-                }
-                // Wake up periodically to log metrics
-                _ = tokio::time::sleep(tokio::time::Duration::from_secs(config::M_COMMANDS_INTERVAL_S)) => {
-                    broadcast_metric(&message_sender, &self.name, self.value().clone());
-                }
-            }
-        }
-    }
 }
 
+/// Broadcast a metric to a channel
 fn broadcast_metric<T>(message_sender: &broadcast::Sender<Message>, metric: &str, value: T)
 where
     rmpv::Value: From<T>,

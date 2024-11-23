@@ -1,3 +1,5 @@
+//! A client to publish and receive messages from a server
+
 use log::{debug, info};
 use tokio::net::TcpStream;
 
@@ -62,7 +64,7 @@ impl Client {
 
     /// Receive a message from the server
     ///
-    /// Returns a datagram::Command, or None when the connection has closed or timeout has
+    /// Returns an interface::Message, or None when the connection has closed or timeout has
     /// been reached
     pub async fn recv(
         &mut self,
@@ -85,11 +87,7 @@ impl Client {
 
     /// Subscribe to messages on topics matching the specified pattern
     ///
-    /// Patterns can contain glob style wildcards: `*``
-    ///
-    /// System messages are sent on topics starting with `!` (e.g. `!subscriptions`),
-    /// and are excluded in wildcard matches. To subscribe to all system messages,
-    /// create a new subscription with the following pattern: `!`
+    /// Patterns can contain glob style wildcards: `*`
     pub async fn subscribe(&self, pattern: &str) {
         let command = interface::Command::Subscribe {
             pattern: pattern.to_string(),

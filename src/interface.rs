@@ -1,3 +1,5 @@
+//! Interface definitions for communication between client and server
+
 use rmp_serde::Serializer;
 use rmpv::Value;
 use serde::de::DeserializeOwned;

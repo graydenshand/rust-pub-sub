@@ -22,6 +22,7 @@ Work in progress.
 
 ### Roadmap
 
+- Thread based (not async) client
 - Extensible server class (e.g. custom handlers)
 - Robust error handling (retries & graceful failures)
     - Server disconnect, client retry logic

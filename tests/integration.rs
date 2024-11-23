@@ -56,8 +56,7 @@ async fn it_publishes_and_receives_messages() {
 
     // Give server 500ms to start, then initialize a client
     tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-    let client: rps::client::Client =
-        rps::client::Client::new(format!("127.0.0.1:{port}"), "test".into()).await;
+    let client: rps::client::Client = rps::client::Client::new(format!("127.0.0.1:{port}")).await;
 
     // Subscribe to all messages
     client.subscribe("*").await;
@@ -85,8 +84,7 @@ async fn it_publishes_and_receives_messages() {
     }
 
     // Reinitialize client
-    let client: rps::client::Client =
-        rps::client::Client::new(format!("127.0.0.1:{port}"), "test".into()).await;
+    let client: rps::client::Client = rps::client::Client::new(format!("127.0.0.1:{port}")).await;
 
     // Unsubscribe
     client.unsubscribe("*").await;

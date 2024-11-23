@@ -1,3 +1,5 @@
+//! A TCP pub/sub server
+
 use log::{debug, info, warn};
 use std::error::Error;
 use uuid::Uuid;
@@ -14,6 +16,7 @@ use crate::config;
 use crate::glob_tree::{self};
 use crate::interface::{Command, Message, MsgPackCodec};
 use crate::metrics;
+use crate::metrics::Metric;
 use futures::sink::SinkExt;
 use tokio_stream::StreamExt;
 use tokio_util::codec::{FramedRead, FramedWrite};
@@ -205,7 +208,10 @@ impl Server {
 
     fn register_metrics(&self) -> MetricsMutator {
         // Command throughput
-        let mut command_throughput = metrics::Throughput::new("commands");
+        let mut command_throughput = metrics::Throughput::new(
+            "commands",
+            tokio::time::Duration::from_secs(config::M_COMMANDS_INTERVAL_S),
+        );
         let command_throughput_mutator = command_throughput.get_mutator();
         let message_sender = self.broadcast_sender.clone();
         tokio::spawn(async move {
@@ -215,7 +221,10 @@ impl Server {
         });
 
         // Connections metric
-        let mut connection_count = metrics::Count::new("connections");
+        let mut connection_count = metrics::Count::new(
+            "connections",
+            tokio::time::Duration::from_secs(config::M_CONNECTIONS_INTERVAL_S),
+        );
         let connection_count_mutator = connection_count.get_mutator();
         let message_sender = self.broadcast_sender.clone();
         tokio::spawn(async move {
@@ -223,7 +232,10 @@ impl Server {
         });
 
         // Messages sent metric
-        let mut messages_sent = metrics::Throughput::new("messages-sent");
+        let mut messages_sent = metrics::Throughput::new(
+            "messages-sent",
+            tokio::time::Duration::from_secs(config::M_MESSAGES_SENT_INTERVAL_S),
+        );
         let message_sender = self.broadcast_sender.clone();
         let messages_sent_mutator = messages_sent.get_mutator();
         tokio::spawn(async move {
