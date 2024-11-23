@@ -13,11 +13,11 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
 use crate::config;
-use crate::glob_tree::{self};
 use crate::interface::{Command, Message, MsgPackCodec};
 use crate::metrics;
 use crate::metrics::Metric;
 use futures::sink::SinkExt;
+use glob_tree::{self};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{FramedRead, FramedWrite};
 

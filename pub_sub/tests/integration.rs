@@ -1,12 +1,12 @@
+use pub_sub;
 use rmpv::Value;
-use rps;
 use tokio;
 
 fn capture(
-    mut client: rps::client::Client,
+    mut client: pub_sub::client::Client,
     n_messages: usize,
     timeout_interval_ms: u64,
-) -> tokio::task::JoinHandle<Vec<rps::interface::Message>> {
+) -> tokio::task::JoinHandle<Vec<pub_sub::interface::Message>> {
     // Spawn a task to listen for messages
     //
     // The task will receive messages until all messages are accounted for, or
@@ -47,7 +47,7 @@ async fn it_publishes_and_receives_messages() {
     ];
 
     // Start server
-    let mut server = rps::server::Server::new(port)
+    let mut server = pub_sub::server::Server::new(port)
         .await
         .expect("Server can bind to address");
     tokio::spawn(async move {
@@ -56,7 +56,8 @@ async fn it_publishes_and_receives_messages() {
 
     // Give server 500ms to start, then initialize a client
     tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-    let client: rps::client::Client = rps::client::Client::new(format!("127.0.0.1:{port}")).await;
+    let client: pub_sub::client::Client =
+        pub_sub::client::Client::new(format!("127.0.0.1:{port}")).await;
 
     // Subscribe to all messages
     client.subscribe("*").await;
@@ -84,7 +85,8 @@ async fn it_publishes_and_receives_messages() {
     }
 
     // Reinitialize client
-    let client: rps::client::Client = rps::client::Client::new(format!("127.0.0.1:{port}")).await;
+    let client: pub_sub::client::Client =
+        pub_sub::client::Client::new(format!("127.0.0.1:{port}")).await;
 
     // Unsubscribe
     client.unsubscribe("*").await;

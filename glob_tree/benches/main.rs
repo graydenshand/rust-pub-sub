@@ -1,7 +1,7 @@
 use criterion::BenchmarkId;
 use criterion::Throughput;
 use criterion::{criterion_group, criterion_main, Criterion};
-use rps::glob_tree::GlobTree;
+use glob_tree::GlobTree;
 
 pub fn check_pattern_size(c: &mut Criterion) {
     let s = std::iter::repeat("a").take(200).collect::<String>();

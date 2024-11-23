@@ -1,0 +1,28 @@
+[package]
+name = "pub_sub"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "time", "fs"] }
+serde = { version = "1.0.203", features = ["derive"] }
+rmp = "0.8.14"
+rmp-serde = "1.3.0"
+rmpv = { version = "1.3.0", features = ["with-serde"] }
+bytes = { version = "1.6.0", features = ["std"] }
+log = "0.4.21"
+futures = "0.3.30"
+clap = { version = "4.5.6", features = ["derive"] }
+chrono = { version = "0.4.38", features = ["now"] }
+uuid = { version = "1.10.0", features = ["v4"] }
+env_logger = "0.11.5"
+tokio-util = { version = "0.7.12", features = ["net", "codec"] }
+tokio-stream = "0.1.16"
+glob_tree = { path = "../glob_tree" }
+
+[dev-dependencies]
+criterion = { version = "0.3", features = ["async_tokio"] }
+
+[[bench]]
+name = "udp_vs_tcp"
+harness = false

@@ -29,7 +29,6 @@
 //! - a reference count, indicating the number of distinct patterns that include that same node
 //! - a collection of child nodes
 
-
 use std::clone::Clone;
 use std::collections::BTreeMap;
 

@@ -1,0 +1,11 @@
+[package]
+name = "glob_tree"
+version = "0.1.0"
+edition = "2021"
+
+[dev-dependencies]
+criterion = { version = "0.3", features = ["async_tokio"] }
+
+[[bench]]
+name = "main"
+harness = false

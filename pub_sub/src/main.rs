@@ -1,16 +1,17 @@
-// use clap::Parser;
+//! Command line application
+
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
 use env_logger;
 use log::info;
-use rps::config;
+use pub_sub::config;
 use std::error::Error;
 use tokio;
 
-use rps::client::{test_client, Client};
-use rps::server::Server;
+use pub_sub::client::{test_client, Client};
+use pub_sub::server::Server;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
