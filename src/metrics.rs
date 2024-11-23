@@ -1,6 +1,6 @@
 use std::error::Error;
 use tokio::sync::mpsc;
-use tokio::time::{Duration, Instant};
+use tokio::time::Instant;
 
 use crate::config;
 

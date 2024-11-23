@@ -65,10 +65,10 @@ impl DatagramProcessor {
                         debug!("{:?}", message.err());
                         continue
                     }
-                    let m = message.expect("Received message from channel");
+                    let m = message?;
 
                     if self.subscriptions.check(&m.topic) {
-                        self.writer.send(m).await.expect("Message is sent to client");
+                        self.writer.send(m).await?;
                     }
                 },
                 command = conn_channel_receiver.recv() => {
@@ -164,7 +164,7 @@ impl Connection {
                     };
                 }
                 Err(e) => {
-                    warn!("{:?}", e);
+                    debug!("{client_id} - DISCONNECT REASON - {:?}", e);
                 }
             }
         }
@@ -236,9 +236,6 @@ impl Server {
                     }
                     // Wake up periodically to log metrics
                     _ = tokio::time::sleep(tokio::time::Duration::from_secs(config::M_COMMANDS_INTERVAL_S)) => {
-                        // Log the count and calculated rate
-                        info!("Commands processed: {} - Rate: {:.2}/s", command_throughput.value(), command_throughput.rate());
-
                         // Broadcast the count and calculated rate
                         Self::publish_metric(message_sender.clone(), "commands", command_throughput.value().clone());
                         Self::publish_metric(message_sender.clone(), "commands-per-second", command_throughput.rate());
@@ -261,7 +258,6 @@ impl Server {
                         result.unwrap()
                     }
                     _ = tokio::time::sleep(tokio::time::Duration::from_secs(config::M_CONNECTIONS_INTERVAL_S)) => {
-                        info!("Connection count: {}", connection_count.value());
                         Self::publish_metric(message_sender.clone(), "connections", connection_count.value().clone());
                     }
                 }

@@ -5,9 +5,8 @@ use criterion::BenchmarkId;
 use std::io::{Read, Write};
 use std::net;
 use std::thread;
-use tokio::runtime::Runtime;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 
 const UDP_DATAGRAM_MAX_SIZE: usize = 4096;
 

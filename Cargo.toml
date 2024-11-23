@@ -26,9 +26,9 @@ criterion = { version = "0.3", features = ["async_tokio"] }
 [build-dependencies]
 tonic-build = "0.11"
 
-# [[bench]]
-# name = "glob_tree"
-# harness = false
+[[bench]]
+name = "glob_tree"
+harness = false
 
 [[bench]]
 name = "udp_vs_tcp"

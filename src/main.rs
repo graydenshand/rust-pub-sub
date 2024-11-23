@@ -4,12 +4,12 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 use env_logger;
-use log::{debug, info};
+use log::info;
+use rps::config;
 use std::error::Error;
 use tokio;
 
-use rmpv::Value;
-use rps::client::Client;
+use rps::client::{test_client, Client};
 use rps::server::Server;
 
 #[derive(Parser)]
@@ -49,6 +49,13 @@ enum Commands {
         #[arg(short, long, default_value_t = String::from("test-client"))]
         client_id: String,
     },
+
+    /// Log metrics published by the server
+    LogMetrics {
+        /// address to send messages to
+        #[arg(short, long)]
+        address: String,
+    },
 }
 
 #[tokio::main]
@@ -68,40 +75,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         Some(Commands::TestClient { address, client_id }) => {
             info!("Running test client...");
-            let mut client = Client::new(address.to_string(), client_id.to_string()).await;
-            client.subscribe("*").await;
-
-            let client_clone = client.clone();
-            let write_future = tokio::spawn(async move {
-                let mut i = 0;
-                loop {
-                    client_clone.publish("test", Value::from(i)).await;
-                    i += 1;
-                }
-            });
-
-            // Event handlers
-            let read_future = tokio::spawn(async move {
-                let mut i = 0;
-                while let Some(message) = client.recv(None).await {
-                    if i % 10_000 == 0 {
-                        let topic = message.topic;
-                        let value = message.value.to_string();
-                        debug!("Message received - {topic} - {value}");
-                    };
-                    i += 1;
-                }
-                panic!("Unexpectedly stopped receiving messages.")
-            });
-
-            tokio::select!(
-                _ = read_future => {
-                    panic!("Stopped receiving messages")
-                },
-                _ = write_future => {
-                    panic!("Stopped sending messages")
-                }
-            );
+            test_client(address, client_id).await
+        }
+        Some(Commands::LogMetrics { address }) => {
+            let mut client = Client::new(address.to_string(), "metrics-logger".into()).await;
+            client
+                .subscribe(&format!("{}/metrics/*", config::SYSTEM_TOPIC_PREFIX))
+                .await;
+            while let Some(m) = client.recv(None).await {
+                info!("{} - {}", m.topic, m.value.as_f64().unwrap())
+            }
         }
         None => {}
     };

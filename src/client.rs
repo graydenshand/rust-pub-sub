@@ -1,5 +1,4 @@
-use log::info;
-use tokio::net::tcp::OwnedReadHalf;
+use log::{debug, info};
 use tokio::net::TcpStream;
 
 use crate::config;
@@ -10,7 +9,6 @@ use tokio::sync::mpsc;
 
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
-use std::error::Error;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
@@ -164,4 +162,42 @@ impl Client {
             }
         }
     }
+}
+
+/// Send some load to a server
+pub async fn test_client(address: &str, client_id: &str) {
+    let mut client = Client::new(address.to_string(), client_id.to_string()).await;
+    // client.subscribe("*").await;
+
+    let client_clone = client.clone();
+    let write_future = tokio::spawn(async move {
+        let mut i = 0;
+        loop {
+            client_clone.publish("test", Value::from(i)).await;
+            i += 1;
+        }
+    });
+
+    // Event handlers
+    let read_future = tokio::spawn(async move {
+        let mut i = 0;
+        while let Some(message) = client.recv(None).await {
+            if i % 10_000 == 0 {
+                let topic = message.topic;
+                let value = message.value.to_string();
+                debug!("Message received - {topic} - {value}");
+            };
+            i += 1;
+        }
+        panic!("Unexpectedly stopped receiving messages.")
+    });
+
+    tokio::select!(
+        _ = read_future => {
+            panic!("Stopped receiving messages")
+        },
+        _ = write_future => {
+            panic!("Stopped sending messages")
+        }
+    );
 }

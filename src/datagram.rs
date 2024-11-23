@@ -4,19 +4,11 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use rmp_serde;
-use std::error::Error;
 
 use bytes::{Buf, BytesMut};
-use futures::sink::SinkExt;
-use futures::stream::StreamExt;
 use std::fmt;
-use std::future::Future;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use log::warn;
-use std::marker::PhantomData;
-use tokio_util::codec::{Decoder, Encoder, Framed};
+use tokio_util::codec::{Decoder, Encoder};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Message {
