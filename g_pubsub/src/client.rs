@@ -154,29 +154,36 @@ impl Client {
 }
 
 /// Send some load to a server
-pub async fn test_client(address: &str) {
+pub async fn test_client(id: &str, address: &str, subscriptions: &[String], interval: Option<tokio::time::Interval>) {
     let mut client = Client::new(address.to_string()).await;
-    // client.subscribe("*").await;
+    for pattern  in subscriptions {
+        client.subscribe(pattern).await;
+    };
+    
 
     let client_clone = client.clone();
+    let topics = "abcdefg".chars().collect::<Vec<char>>();
+    let mut interval_clone = interval;
     let write_future = tokio::spawn(async move {
         let mut i = 0;
         loop {
-            client_clone.publish("test", Value::from(i)).await;
+            let topic  = topics[ i % topics.len()];
+            client_clone.publish(&topic.to_string(), Value::Boolean(true)).await;
+
+            if let Some(i) = &mut interval_clone {
+                i.tick().await;
+            };
             i += 1;
         }
     });
 
     // Event handlers
+    let id_clone= id.to_string();
     let read_future = tokio::spawn(async move {
-        let mut i = 0;
         while let Some(message) = client.recv(None).await {
-            if i % 10_000 == 0 {
-                let topic = message.topic;
-                let value = message.value.to_string();
-                debug!("Message received - {topic} - {value}");
-            };
-            i += 1;
+            let topic = message.topic;
+            let value = message.value.to_string();
+            debug!("Client #{id_clone} - Message received - {topic} - {value}", );
         }
         panic!("Unexpectedly stopped receiving messages.")
     });

@@ -45,6 +45,18 @@ enum Commands {
         /// address to send messages to
         #[arg(short, long)]
         address: String,
+
+        /// Number of test clients to run
+        #[arg(short, long)]
+        number: u64,
+
+        /// Pattern to subscribe to
+        #[arg(short, long, action = clap::ArgAction::Append)]
+        subscribe: Vec<String>,
+
+        /// Interval in seconds at which each client should send messages
+        #[arg(short, long)]
+        interval: Option<f64>
     },
 
     /// Log metrics published by the server
@@ -70,9 +82,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let mut server = Server::new(*port).await?;
             server.run().await?;
         }
-        Some(Commands::TestClient { address }) => {
+        Some(Commands::TestClient { address, number, subscribe, interval }) => {
             info!("Running test client...");
-            test_client(address).await
+            let mut futures = vec![];
+            for i in 0..*number {
+                let ac = address.clone();
+                let subscribers = subscribe.clone();
+                let t_interval = match interval {
+                    Some(i) => Some(tokio::time::interval(tokio::time::Duration::from_secs_f64(*i))),
+                    None => None
+                };
+                futures.push(tokio::spawn( async move {
+                    test_client(&format!("{i}"), &ac, &subscribers[..], t_interval).await;
+                }));
+            }
+            for f in futures {
+                f.await.unwrap();
+            }
         }
         Some(Commands::LogMetrics { address }) => {
             let mut client = Client::new(address.to_string()).await;
