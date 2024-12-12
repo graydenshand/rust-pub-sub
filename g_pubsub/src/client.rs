@@ -154,12 +154,16 @@ impl Client {
 }
 
 /// Send some load to a server
-pub async fn test_client(id: &str, address: &str, subscriptions: &[String], interval: Option<tokio::time::Interval>) {
+pub async fn test_client(
+    id: &str,
+    address: &str,
+    subscriptions: &[String],
+    interval: Option<tokio::time::Interval>,
+) {
     let mut client = Client::new(address.to_string()).await;
-    for pattern  in subscriptions {
+    for pattern in subscriptions {
         client.subscribe(pattern).await;
-    };
-    
+    }
 
     let client_clone = client.clone();
     let topics = "abcdefg".chars().collect::<Vec<char>>();
@@ -167,8 +171,10 @@ pub async fn test_client(id: &str, address: &str, subscriptions: &[String], inte
     let write_future = tokio::spawn(async move {
         let mut i = 0;
         loop {
-            let topic  = topics[ i % topics.len()];
-            client_clone.publish(&topic.to_string(), Value::Boolean(true)).await;
+            let topic = topics[i % topics.len()];
+            client_clone
+                .publish(&topic.to_string(), Value::Boolean(true))
+                .await;
 
             if let Some(i) = &mut interval_clone {
                 i.tick().await;
@@ -178,12 +184,12 @@ pub async fn test_client(id: &str, address: &str, subscriptions: &[String], inte
     });
 
     // Event handlers
-    let id_clone= id.to_string();
+    let id_clone = id.to_string();
     let read_future = tokio::spawn(async move {
         while let Some(message) = client.recv(None).await {
             let topic = message.topic;
             let value = message.value.to_string();
-            debug!("Client #{id_clone} - Message received - {topic} - {value}", );
+            debug!("Client #{id_clone} - Message received - {topic} - {value}",);
         }
         panic!("Unexpectedly stopped receiving messages.")
     });

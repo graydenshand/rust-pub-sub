@@ -148,18 +148,22 @@ impl GlobTree {
     ///
     /// Args
     /// - s: the string to match
-    pub fn check(&self, s: &str) -> bool {
+    pub fn check(&self, s: &str) -> Option<String> {
         let mut cursor = &self.root;
         let mut active_wildcard: Option<&Node> = None;
+        let mut wildcard_idx: Option<usize> = None;
+        let mut pattern = String::new();
         for c in s.chars() {
             // Get next character from chldren
             let mut next = cursor.children.get(&c);
 
             // If not found, look for wildcard
             if next.is_none() {
+                // First look for variable length wildcard
                 next = cursor.children.get(&WILDCARD);
                 if next.is_some() {
                     active_wildcard = next;
+                    wildcard_idx = Some(pattern.len() + 1)
                 }
             }
 
@@ -168,6 +172,9 @@ impl GlobTree {
                 // Next character is in tree, continue check
                 Some(node) => {
                     cursor = node;
+                    if let Some(c) = cursor.token {
+                        pattern.push(c);
+                    }
                 }
                 // No children matching next token in pattern
                 None => {
@@ -176,7 +183,7 @@ impl GlobTree {
                         Some(node) => {
                             // Last character in pattern is a wildcard, string is matched
                             if node.is_terminal() {
-                                return true;
+                                return Some(pattern);
                             }
                             // There are more tokens in pattern beyond wildcard, so reset cursor to wildcard node.
                             // This is necessary when a wildcard is followed by several characters (e.g. '*1234').
@@ -185,10 +192,11 @@ impl GlobTree {
                             // token '5', this doesn't invalidate the match (because of the wildcard), but we also need
                             // to  reset the active token in the cursor to the wildcard to correctly match the next
                             // token in the pattern (in this case, '1').
-                            cursor = node
+                            cursor = node;
+                            pattern.truncate(wildcard_idx.unwrap());
                         }
                         // No active wildcard, string doesn't match any patterns
-                        None => return false,
+                        None => return None,
                     }
                 }
             }
@@ -196,7 +204,11 @@ impl GlobTree {
         // Reached end of s, but tree may continue if there are overlapping patterns.
         // If the reference count of this node's children is less than the reference count of this node
         // then we know the tree contains a pattern that terminates on this node
-        cursor.is_terminal()
+        if cursor.is_terminal() {
+            Some(pattern)
+        } else {
+            None
+        }
     }
 
     /// Returns true if tree contains pattern
@@ -250,43 +262,44 @@ mod tests {
     #[test]
     fn test_check() {
         let mut t = GlobTree::new();
-        assert!(!t.check("metrics"));
+        assert_eq!(t.check("metrics"), None);
         t.insert("metrics");
-        assert!(t.check("metrics"));
+        assert_eq!(t.check("metrics"), Some("metrics".into()));
     }
 
     #[test]
     fn test_remove() {
         let mut t = GlobTree::new();
         t.insert("metrics");
-        assert!(t.check("metrics"));
+        assert_eq!(t.check("metrics"), Some("metrics".into()));
         t.remove("metrics").unwrap();
         assert!(t.root.children.is_empty());
-        assert!(!t.check("metrics"));
+        assert!(t.check("metrics").is_none());
     }
 
     #[test]
     fn test_wildcard() {
         let mut t = GlobTree::new();
         t.insert(&WILDCARD.to_string());
-        assert!(t.check("foo"));
+        assert!(t.check("foo").is_some());
     }
 
     #[test]
     fn test_inner_wildcard() {
         let mut t = GlobTree::new();
-        t.insert(&format!("fooo{}ar", WILDCARD));
-        assert!(t.check("fooozar".into()));
-        assert!(t.check("fooo/zbasfjadfasldfjah/ar".into()));
-        assert!(!t.check("fooo/zbasfjadfasldfjah/".into()));
-        assert!(!t.check("fooozarnt".into()));
+        let pattern = format!("fooo{}ar", WILDCARD);
+        t.insert(&pattern);
+        assert!(t.check("fooozar".into()).is_some());
+        assert_eq!(t.check("fooo/zbasfjadfasldfjah/ar".into()), Some(pattern));
+        assert!(t.check("fooo/zbasfjadfasldfjah/".into()).is_none());
+        assert!(t.check("fooozarnt".into()).is_none());
     }
 
     #[test]
     fn test_partial_match() {
         let mut t = GlobTree::new();
         t.insert("testing");
-        assert!(!t.check("test".into()));
+        assert!(t.check("test".into()).is_none());
     }
 
     #[test]
@@ -294,7 +307,7 @@ mod tests {
         let mut t = GlobTree::new();
         t.insert("testing");
         t.insert("test");
-        assert!(t.check("test".into()));
+        assert_eq!(t.check("test".into()), Some("test".into()));
     }
 
     #[test]
@@ -356,5 +369,13 @@ mod tests {
         assert_eq!(node.child_count(), 0);
         node.insert_child(Node::new(Some('b')));
         assert_eq!(node.child_count(), 1);
+    }
+
+    #[test]
+    fn test_fixed_length_wildcard() {
+        let mut t = GlobTree::new();
+        t.insert("ab?d");
+        assert!(t.check("abcd").is_some());
+        assert!(t.check("abccd").is_none());
     }
 }

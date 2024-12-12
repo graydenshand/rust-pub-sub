@@ -50,12 +50,18 @@ impl CommandProcessor {
                     let m = message?;
 
                     // Check if published message is in this client's subscriptions before sending
-                    if self.subscriptions.check(&m.topic) {
-                        let (_,r2) = tokio::join!(
-                            metrics_mutator.messages_sent.increment(),
-                            self.writer.send(m)
-                        );
-                        r2?
+                    match self.subscriptions.check(&m.topic) {
+                        None => (),
+                        Some(pattern) => {
+                            // Suppress system topics unless explicitly subscribed
+                            if !(m.topic.starts_with(config::SYSTEM_TOPIC_PREFIX) && !pattern.starts_with(config::SYSTEM_TOPIC_PREFIX)) {
+                                let (_,r2) = tokio::join!(
+                                    metrics_mutator.messages_sent.increment(),
+                                    self.writer.send(m)
+                                );
+                                r2?
+                            }
+                        }
                     }
                 },
                 command = conn_channel_receiver.recv() => {

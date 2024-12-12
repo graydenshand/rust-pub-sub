@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 use env_logger;
-use log::info;
 use g_pubsub::config;
+use log::info;
 use std::error::Error;
 use tokio;
 
@@ -56,7 +56,7 @@ enum Commands {
 
         /// Interval in seconds at which each client should send messages
         #[arg(short, long)]
-        interval: Option<f64>
+        interval: Option<f64>,
     },
 
     /// Log metrics published by the server
@@ -82,17 +82,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let mut server = Server::new(*port).await?;
             server.run().await?;
         }
-        Some(Commands::TestClient { address, number, subscribe, interval }) => {
+        Some(Commands::TestClient {
+            address,
+            number,
+            subscribe,
+            interval,
+        }) => {
             info!("Running test client...");
             let mut futures = vec![];
             for i in 0..*number {
                 let ac = address.clone();
                 let subscribers = subscribe.clone();
                 let t_interval = match interval {
-                    Some(i) => Some(tokio::time::interval(tokio::time::Duration::from_secs_f64(*i))),
-                    None => None
+                    Some(i) => Some(tokio::time::interval(tokio::time::Duration::from_secs_f64(
+                        *i,
+                    ))),
+                    None => None,
                 };
-                futures.push(tokio::spawn( async move {
+                futures.push(tokio::spawn(async move {
                     test_client(&format!("{i}"), &ac, &subscribers[..], t_interval).await;
                 }));
             }
