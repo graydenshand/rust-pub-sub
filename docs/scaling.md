@@ -22,6 +22,9 @@ I see two paths to address _that_ issue:
 2) Intelligent server network -- instead of a single layer of a network structure where every server is connected to the others, use a more sparse structure and intelligent message forwarding to broadcast messages
     - E.g. with 3 servers A,B,C don't send from A->B and A->C, instead send A->B, B->C
     - This could theoretically allow the network to propagate a message to an unlimited number of clients, though with deteriorating performance.
+    - Goal would be to minimize the distance between any given two nodes, i.e. keep the network dense & fully connected, without cauasing any one node
+        to become overutilized.
+    
 
 # Scaling Commands
 
