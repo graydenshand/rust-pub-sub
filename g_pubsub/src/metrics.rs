@@ -50,7 +50,7 @@ pub trait Metric {
 }
 
 /// Mutate a Throughput metric
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ThroughputMutator {
     sender: mpsc::Sender<u64>,
 }
@@ -69,6 +69,7 @@ impl ThroughputMutator {
 ///
 /// Use the get_mutator() method to get an object for mutating this metric from
 /// another task.
+#[derive(Debug)]
 pub struct Throughput {
     name: String,
     value: u64,
@@ -154,7 +155,7 @@ impl Throughput {
 }
 
 /// Mutate a Count metric
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CountMutator {
     sender: mpsc::Sender<i64>,
 }
@@ -175,6 +176,7 @@ impl CountMutator {
 }
 
 /// A metric for keeping a count of things, e.g. the number of active connections
+#[derive(Debug)]
 pub struct Count {
     name: String,
     value: u64,

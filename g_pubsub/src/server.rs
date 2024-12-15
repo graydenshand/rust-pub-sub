@@ -21,6 +21,8 @@ use glob_tree::{self};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
+use fastwebsockets::{WebSocket, Role};
+
 struct CommandProcessor {
     subscriptions: glob_tree::GlobTree,
     writer: FramedWrite<OwnedWriteHalf, MsgPackCodec<Message>>,
@@ -38,7 +40,7 @@ impl CommandProcessor {
         &mut self,
         mut message_channel_receiver: broadcast::Receiver<Message>,
         mut conn_channel_receiver: mpsc::Receiver<Command>,
-        metrics_mutator: MetricsMutator,
+        metrics_mutator: ServerMetrics,
     ) -> Result<(), Box<dyn Error>> {
         loop {
             tokio::select! {
@@ -90,7 +92,7 @@ impl Connection {
     fn open(
         stream: tokio::net::TcpStream,
         broadcast_sender: broadcast::Sender<Message>,
-        metrics_mutator: MetricsMutator,
+        metrics_mutator: ServerMetrics,
     ) {
         let connection_id = Uuid::new_v4().to_string();
         info!("{} - CONNECT", connection_id);
@@ -130,7 +132,7 @@ impl Connection {
         broadcast_sender: broadcast::Sender<Message>,
         connection_id: String,
         conn_channel_sender: mpsc::Sender<Command>,
-        metrics_mutator: MetricsMutator,
+        metrics_mutator: ServerMetrics,
     ) -> Result<(), Box<dyn Error>> {
         metrics_mutator.connection_count.add(1).await;
         let codec = MsgPackCodec::<Command>::new();
@@ -167,7 +169,7 @@ impl Connection {
         stream: OwnedWriteHalf,
         receiver: broadcast::Receiver<Message>,
         conn_channel_receiver: mpsc::Receiver<Command>,
-        metrics_mutator: MetricsMutator,
+        metrics_mutator: ServerMetrics,
     ) {
         tokio::spawn(async {
             let message_codec = MsgPackCodec::<Message>::new();
@@ -180,46 +182,22 @@ impl Connection {
     }
 }
 
-#[derive(Clone)]
-struct MetricsMutator {
+#[derive(Clone, Debug)]
+struct ServerMetrics {
     /// Metrics
     command_throughput: metrics::ThroughputMutator,
     connection_count: metrics::CountMutator,
     messages_sent: metrics::ThroughputMutator,
 }
-
-/// An async message passing application
-#[derive(Debug)]
-pub struct Server {
-    /// Port on which to listen for new requests
-    port: u16,
-    ///  Writer to broadcast messages to all connection tasks
-    broadcast_sender: broadcast::Sender<Message>,
-    /// Reader from broadcast message channel - not actually used, but the channel will close if there is not at least
-    /// one active reader. To prevent the channel from closing when there are 0 connected clients, we keep a reader
-    /// referenced here.
-    _broadcast_receiver: broadcast::Receiver<Message>,
-}
-impl Server {
-    /// Create a new server
-    pub async fn new(port: u16) -> Result<Server, Box<dyn Error>> {
-        let (broadcast_sender, _broadcast_receiver) =
-            broadcast::channel(config::CHANNEL_BUFFER_SIZE);
-        Ok(Server {
-            port,
-            broadcast_sender,
-            _broadcast_receiver,
-        })
-    }
-
-    fn register_metrics(&self) -> MetricsMutator {
+impl ServerMetrics {
+    fn new(broadcast_sender: broadcast::Sender<Message>) -> ServerMetrics {
         // Command throughput
         let mut command_throughput = metrics::Throughput::new(
             "commands",
             tokio::time::Duration::from_secs(config::M_COMMANDS_INTERVAL_S),
         );
         let command_throughput_mutator = command_throughput.get_mutator();
-        let message_sender = self.broadcast_sender.clone();
+        let message_sender = broadcast_sender.clone();
         tokio::spawn(async move {
             command_throughput
                 .listen_and_broadcast(message_sender)
@@ -232,7 +210,7 @@ impl Server {
             tokio::time::Duration::from_secs(config::M_CONNECTIONS_INTERVAL_S),
         );
         let connection_count_mutator = connection_count.get_mutator();
-        let message_sender = self.broadcast_sender.clone();
+        let message_sender = broadcast_sender.clone();
         tokio::spawn(async move {
             connection_count.listen_and_broadcast(message_sender).await;
         });
@@ -242,24 +220,49 @@ impl Server {
             "messages-sent",
             tokio::time::Duration::from_secs(config::M_MESSAGES_SENT_INTERVAL_S),
         );
-        let message_sender = self.broadcast_sender.clone();
+        let message_sender = broadcast_sender.clone();
         let messages_sent_mutator = messages_sent.get_mutator();
         tokio::spawn(async move {
             messages_sent.listen_and_broadcast(message_sender).await;
         });
 
-        MetricsMutator {
+        ServerMetrics {
             command_throughput: command_throughput_mutator,
             connection_count: connection_count_mutator,
             messages_sent: messages_sent_mutator,
         }
     }
+}
 
-    /// Listen for incoming connections
-    pub async fn run(&mut self) -> Result<(), Box<dyn Error>> {
-        let listener = TcpListener::bind(format!("0.0.0.0:{}", self.port)).await?;
+/// An async message passing application
+#[derive(Debug)]
+pub struct Server {
+    ///  Writer to broadcast messages to all connection tasks
+    broadcast_sender: broadcast::Sender<Message>,
+    /// Reader from broadcast message channel - not actually used, but the channel will close if there is not at least
+    /// one active reader. To prevent the channel from closing when there are 0 connected clients, we keep a reader
+    /// referenced here.
+    _broadcast_receiver: broadcast::Receiver<Message>,
+    /// Metrics about this server
+    metrics: ServerMetrics,
+}
+impl Server {
+    /// Create a new server
+    pub async fn new(port: u16) -> Result<Server, Box<dyn Error>> {
+        let (broadcast_sender, _broadcast_receiver) =
+            broadcast::channel(config::CHANNEL_BUFFER_SIZE);
+        let server = Server {
+            port,
+            broadcast_sender: broadcast_sender.clone(),
+            _broadcast_receiver,
+            metrics: ServerMetrics::new(broadcast_sender)
+        };
+        Ok(server)
+    }
 
-        let metrics_mutator = self.register_metrics();
+    /// Listen for incoming tcp connections
+    pub async fn bind_tcp(&mut self, port: &u16) -> Result<(), Box<dyn Error>> {
+        let listener = TcpListener::bind(format!("0.0.0.0:{}",port)).await?;
 
         loop {
             // Accept a new connection
@@ -268,8 +271,24 @@ impl Server {
             Connection::open(
                 stream,
                 self.broadcast_sender.clone(),
-                metrics_mutator.clone(),
+                self.metrics.clone(),
             );
+        }
+    }
+
+    /// Listen for incoming websocket connections
+    pub async fn bind_ws(&mut self, port: &u16) -> Result<(), Box<dyn Error>> {
+        let listener = TcpListener::bind(format!("0.0.0.0:{}",port)).await?;
+
+        loop {
+            // Accept a new connection
+            let (stream, _) = listener.accept().await?;
+
+            // Upgrade connection
+            let mut ws = WebSocket::after_handshake(stream, Role::Server);
+
+
+            /// spawn connection task
         }
     }
 }

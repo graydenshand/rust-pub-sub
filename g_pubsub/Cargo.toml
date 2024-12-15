@@ -20,6 +20,8 @@ env_logger = "0.11.5"
 tokio-util = { version = "0.7.12", features = ["net", "codec"] }
 tokio-stream = "0.1.16"
 glob-tree = { path = "../glob_tree" }
+tokio-tungstenite = "0.24.0"
+fastwebsockets = "0.8.0"
 
 [dev-dependencies]
 criterion = { version = "0.3", features = ["async_tokio"] }
