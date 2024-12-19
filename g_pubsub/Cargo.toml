@@ -23,6 +23,7 @@ glob-tree = { path = "../glob_tree" }
 
 [dev-dependencies]
 criterion = { version = "0.3", features = ["async_tokio"] }
+flamegraph = "0.6.6"
 
 [build-dependencies]
 tonic-build = "0.11"

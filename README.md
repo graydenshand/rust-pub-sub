@@ -1,12 +1,12 @@
-# g_pubsub
+# MessageCast
 
-A TCP Pub/Sub server & client, with a lightweight protocol over msgpack.
+A fast & flexible Pub/Sub broker, with a lightweight protocol over msgpack.
 
 ## Priorities
 
 - Flexible: Using a flexible, self describing protocol supports a flexible and versitile message broker
-- Performant: Async client and server, compressed data over wire to efficiently use network IO
-- Usable: Simple, minimal interface, open protocol supports integration with other systems
+- Performant: Async. Multi-core. Compression. Horizontal scaling.
+- Usable: Simple, minimal interface. Open protocol.
 
 ## Example
 
@@ -36,12 +36,21 @@ while let Some(message: Message) = client.recv(receive_timeout).await {
 
 Work in progress.
 
-### Roadmap
+### Backlog
 
-Security
-- TLS & Authentication
+Core
+- High availability
+- Horizontal scaling (cluster mode)
+- Replay
+- Websocket port
+- UDP port
 
-Client Usability
+Usability
 - Python bindings
 - Thread based (not async) client
 - Automatic reconnect
+- Docker image
+
+Security
+- TLS
+- Access control
