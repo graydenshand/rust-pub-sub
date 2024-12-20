@@ -1,4 +1,4 @@
-# MessageCast
+# blastrs
 
 A fast & flexible Pub/Sub broker, with a lightweight protocol over msgpack.
 
