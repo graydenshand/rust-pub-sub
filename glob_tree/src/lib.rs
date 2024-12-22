@@ -4,7 +4,8 @@
 //!
 //! Each node in the tree represents a single character of a pattern.
 //!
-//! **Example**
+//! ## Example
+//! 
 //! Take the pattern 'fo*', if inserted into an empty tree the tree would look like this:
 //! ```txt
 //! root
@@ -16,8 +17,12 @@
 //! Many such patterns can be inserted into the tree. Use the `check()` method on a string to determine if any of the
 //! patterns in the tree match that string.
 //!
-//! The asterisk "*" is a wildcard character, matching any characters. For example, the pattern `foo*` matches both
-//! `"food"` and `"football"`. A wildcard isn't limited to the end of the string,
+//! The asterisk "*" is a wildcard character, matching any characters any number of times. For example, the pattern
+//! `foo*` matches both `"food"` and `"football"`. A wildcard isn't limited to the end of the string, for example the
+//! pattern `fo*l` would match the strings `"fool"` and `"foil"`, but not `"focus"`.
+//! 
+//! The question mark "?" a wildcard character that can be used exactly once. For example, the pattern `foo?` would
+//! match `"food"` but not `"football"`.
 //!
 //! The best applications of this data structure involve matching a high volume of strings against a large collection of distinct
 //! patterns.
@@ -28,11 +33,19 @@
 //! - a token (char)
 //! - a reference count, indicating the number of distinct patterns that include that same node
 //! - a collection of child nodes
+//! 
+//! 
+//! ```rs
+//! let tree = GlobTree::new();
+//! tree.insert('foo*')
+//! assert!(tree.check("food") == Some("foo*".into()))
+//! ```
 
 use std::clone::Clone;
 use std::collections::BTreeMap;
 
-const WILDCARD: char = '*';
+const MULTI_CHARACTER_WILDCARD: char = '*';
+const SINGLE_CHARACTER_WILDCARD: char = '?';
 
 #[derive(Debug, Clone, PartialEq)]
 struct Node {
@@ -107,6 +120,79 @@ impl Node {
 
         strings
     }
+
+    /// Search tree starting from this node for pattern matching the given string
+    fn match_string(&self, s: &str) -> Option<String> {
+        let pattern = String::new();
+        self._match_string_worker(s, pattern)
+    }
+
+    fn _match_string_worker(&self, s: &str, pattern: String) -> Option<String> {
+        let mut chars = s.chars().peekable();
+        let mut next_pattern = pattern.clone();
+
+        // Skip this if token is None (root node)
+        if let Some(t) = self.token {
+            if let Some(c) = chars.next() {
+                // if the next character doesn't match the current character or a wild card, exit
+                // One exception is made for when there is an active multi-character wildcard
+                if ![c, MULTI_CHARACTER_WILDCARD, SINGLE_CHARACTER_WILDCARD].contains(&t) {
+                    // Doesn't match
+                    return None;
+                };
+                next_pattern.push(t);
+            }
+        };
+
+        let next_string = chars.clone().collect::<String>();
+
+        let next_char = chars.peek();
+        match next_char {
+            Some(c) => {
+                // Check for direct child
+                if let Some(node) = self.children.get(&c) {
+                    if let Some(s) = node._match_string_worker(&next_string, next_pattern.clone()) {
+                        return Some(s);
+                    }
+                }
+
+                // No match on next char in string, check single-char wildcard
+                if let Some(node) = self.children.get(&SINGLE_CHARACTER_WILDCARD) {
+                    if let Some(s) = node._match_string_worker(&next_string, next_pattern.clone()) {
+                        return Some(s);
+                    }
+                }
+
+                // No match on single-char wildcard, check for active multi-char wildcard.
+                // skips appending the token to the pattern, and instead re-invokes using the new string but same pattern
+                if let Some(t) = self.token {
+                    if t == MULTI_CHARACTER_WILDCARD {
+                        if let Some(s) = self._match_string_worker(&next_string, pattern.clone()) {
+                            return Some(s);
+                        }
+                    }
+                }
+
+                // No match on active multi-char wildcard, check for new multi-char wildcard
+                if let Some(node) = self.children.get(&MULTI_CHARACTER_WILDCARD) {
+                    if let Some(s) = node._match_string_worker(&next_string, next_pattern.clone()) {
+                        return Some(s);
+                    }
+                }
+                // Doesn't match
+                None
+            }
+            // End of string, check if pattern is terminal
+            None => {
+                if self.is_terminal() {
+                    Some(next_pattern)
+                } else {
+                    // Doesn't match
+                    None
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -149,66 +235,7 @@ impl GlobTree {
     /// Args
     /// - s: the string to match
     pub fn check(&self, s: &str) -> Option<String> {
-        let mut cursor = &self.root;
-        let mut active_wildcard: Option<&Node> = None;
-        let mut wildcard_idx: Option<usize> = None;
-        let mut pattern = String::new();
-        for c in s.chars() {
-            // Get next character from chldren
-            let mut next = cursor.children.get(&c);
-
-            // If not found, look for wildcard
-            if next.is_none() {
-                // First look for variable length wildcard
-                next = cursor.children.get(&WILDCARD);
-                if next.is_some() {
-                    active_wildcard = next;
-                    wildcard_idx = Some(pattern.len() + 1)
-                }
-            }
-
-            // If next
-            match next {
-                // Next character is in tree, continue check
-                Some(node) => {
-                    cursor = node;
-                    if let Some(c) = cursor.token {
-                        pattern.push(c);
-                    }
-                }
-                // No children matching next token in pattern
-                None => {
-                    match active_wildcard {
-                        // There is an active wildcard, reset cursor to this node and continue searching
-                        Some(node) => {
-                            // Last character in pattern is a wildcard, string is matched
-                            if node.is_terminal() {
-                                return Some(pattern);
-                            }
-                            // There are more tokens in pattern beyond wildcard, so reset cursor to wildcard node.
-                            // This is necessary when a wildcard is followed by several characters (e.g. '*1234').
-                            // All characters beyond the wildcard must be matched consecutively for the string to be a
-                            // match. E.g. `1235_1234` matches `*1234`, but not until the end. When we encounter the
-                            // token '5', this doesn't invalidate the match (because of the wildcard), but we also need
-                            // to  reset the active token in the cursor to the wildcard to correctly match the next
-                            // token in the pattern (in this case, '1').
-                            cursor = node;
-                            pattern.truncate(wildcard_idx.unwrap());
-                        }
-                        // No active wildcard, string doesn't match any patterns
-                        None => return None,
-                    }
-                }
-            }
-        }
-        // Reached end of s, but tree may continue if there are overlapping patterns.
-        // If the reference count of this node's children is less than the reference count of this node
-        // then we know the tree contains a pattern that terminates on this node
-        if cursor.is_terminal() {
-            Some(pattern)
-        } else {
-            None
-        }
+        self.root.match_string(s)
     }
 
     /// Returns true if tree contains pattern
@@ -278,16 +305,16 @@ mod tests {
     }
 
     #[test]
-    fn test_wildcard() {
+    fn test_wildcard_simple() {
         let mut t = GlobTree::new();
-        t.insert(&WILDCARD.to_string());
+        t.insert(&MULTI_CHARACTER_WILDCARD.to_string());
         assert!(t.check("foo").is_some());
     }
 
     #[test]
     fn test_inner_wildcard() {
         let mut t = GlobTree::new();
-        let pattern = format!("fooo{}ar", WILDCARD);
+        let pattern = format!("fooo{}ar", MULTI_CHARACTER_WILDCARD);
         t.insert(&pattern);
         assert!(t.check("fooozar".into()).is_some());
         assert_eq!(t.check("fooo/zbasfjadfasldfjah/ar".into()), Some(pattern));
@@ -372,10 +399,26 @@ mod tests {
     }
 
     #[test]
-    fn test_fixed_length_wildcard() {
+    fn test_fixed_length_wildcard_simple() {
         let mut t = GlobTree::new();
         t.insert("ab?d");
         assert!(t.check("abcd").is_some());
         assert!(t.check("abccd").is_none());
+    }
+
+    #[test]
+    fn test_fixed_length_wildcard_overlapping_variable_length_wildcard() {
+        let mut t = GlobTree::new();
+        t.insert("ab?d");
+        t.insert("ab*");
+        assert!(t.check("abcd") == Some("ab?d".into()));
+        assert!(t.check("abccd") == Some("ab*".into()));
+    }
+
+    #[test]
+    fn test_empty_string_matches_empty_pattern() {
+        let mut t = GlobTree::new();
+        t.insert("");
+        assert!(t.check("") == Some("".into()));
     }
 }

@@ -64,13 +64,7 @@ impl Clone for Bus {
 }
 
 /// An interface that supports receiving commands and sending messages to a client.
-pub trait Adapter {
-    /// Send a message to the client
-    async fn send(&self, message: Message) -> Result<(), mpsc::error::SendError<Message>>;
-
-    /// Recieve a command from the client
-    async fn recv(&mut self) -> Option<Command>;
-
+trait Adapter {
     /// Consume this adapter and convert it into independent sender and receiver channels
     fn into_channels(self) -> (mpsc::Sender<Message>, mpsc::Receiver<Command>);
 }
@@ -258,16 +252,6 @@ impl TcpAdapter {
     }
 }
 impl Adapter for TcpAdapter {
-    /// Send a message to the client
-    async fn send(&self, message: Message) -> Result<(), mpsc::error::SendError<Message>> {
-        self.sender.send(message).await
-    }
-
-    /// Recieve a command from the client
-    async fn recv(&mut self) -> Option<Command> {
-        self.receiver.recv().await
-    }
-
     /// Consume this adapter and convert it into independent sender and receiver channels
     fn into_channels(self) -> (mpsc::Sender<Message>, mpsc::Receiver<Command>) {
         (self.sender, self.receiver)
