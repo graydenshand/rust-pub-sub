@@ -1,4 +1,5 @@
-//! Command line application
+//! lbroker command line interface
+//! It can be used to run the server, test client, and log server metrics.
 
 use std::path::PathBuf;
 

@@ -5,6 +5,7 @@ edition = "2021"
 
 [dev-dependencies]
 criterion = { version = "0.3", features = ["async_tokio"] }
+regex = "1.11.1"
 
 [[bench]]
 name = "main"

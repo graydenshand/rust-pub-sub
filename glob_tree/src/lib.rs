@@ -29,12 +29,6 @@
 //! - Pub sub: Filtering messages sent to a client by checking the message topic against a tree of subscription patterns
 //! - File system scanning: searching over a file system for files matching a set of patterns
 //!
-//! Each node in the tree stores:
-//! - a token (char)
-//! - a reference count, indicating the number of distinct patterns that include that same node
-//! - a collection of child nodes
-//!
-//!
 //! ```rs
 //! let tree = GlobTree::new();
 //! tree.insert('foo*')
@@ -208,11 +202,6 @@ impl GlobTree {
     }
 
     /// Add a pattern to the tree
-    ///
-    /// Args:
-    ///     pattern: a pattern to insert
-    ///
-    ///
     pub fn insert(&mut self, pattern: &str) {
         // Cursor stores the current node
         let mut cursor = &mut self.root;
@@ -231,9 +220,6 @@ impl GlobTree {
     }
 
     /// Check if a string is matched by a pattern in this tree
-    ///
-    /// Args
-    /// - s: the string to match
     pub fn check(&self, s: &str) -> Option<String> {
         self.root.match_string(s)
     }

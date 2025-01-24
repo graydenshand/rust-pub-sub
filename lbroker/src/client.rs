@@ -49,19 +49,6 @@ impl Client {
         self.send_command(command).await;
     }
 
-    /// Handy util for timing out an opteration that would otherwise block forever
-    ///
-    /// Used with tokio::select! macro, this can interrupt a process after a set
-    /// duration. If no timeout is set, it will run forever.
-    async fn optional_timeout(duration: Option<tokio::time::Duration>) {
-        match duration {
-            Some(d) => tokio::time::sleep(d).await,
-            None => loop {
-                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await
-            },
-        }
-    }
-
     /// Receive a message from the server
     ///
     /// Returns an interface::Message, or None when the connection has closed or timeout has
@@ -151,24 +138,8 @@ pub async fn test_client(
     for pattern in subscriptions {
         client.subscribe(pattern).await;
     }
-
-    let client_clone = client.clone();
     let topics = "abcdefg".chars().collect::<Vec<char>>();
-    let mut interval_clone = interval;
-    let write_future = tokio::spawn(async move {
-        let mut i = 0;
-        loop {
-            let topic = topics[i % topics.len()];
-            client_clone
-                .publish(&topic.to_string(), Value::Boolean(true))
-                .await;
-
-            if let Some(i) = &mut interval_clone {
-                i.tick().await;
-            };
-            i += 1;
-        }
-    });
+    let write_future = test_client_write_loop(client.clone(), topics, interval);
 
     // Event handlers
     let id_clone = id.to_string();
@@ -189,4 +160,40 @@ pub async fn test_client(
             panic!("Stopped sending messages")
         }
     );
+}
+
+
+/// Send some load to a server
+fn test_client_write_loop(
+    client: Client,
+    topics: Vec<char>,
+    interval: Option<tokio::time::Interval>,
+) -> tokio::task::JoinHandle<()> {
+    let mut interval_clone = interval;
+    tokio::spawn(async move {
+        let mut i = 0;
+        loop {
+            let topic = topics[i % topics.len()];
+            client
+                .publish(&topic.to_string(), Value::Boolean(true))
+                .await;
+
+            if let Some(i) = &mut interval_clone {
+                i.tick().await;
+            };
+            i += 1;
+        }
+    })
+}
+
+fn test_client_read_loop(mut client: Client, id: &str) -> tokio::task::JoinHandle<()> {
+    let id_clone = id.to_string();
+    tokio::spawn(async move {
+        while let Some(message) = client.recv().await {
+            let topic = message.topic;
+            let value = message.value.to_string();
+            debug!("Client #{id_clone} - Message received - {topic} - {value}",);
+        }
+        panic!("Unexpectedly stopped receiving messages.")
+    })
 }
