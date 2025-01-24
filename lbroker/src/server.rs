@@ -2,7 +2,6 @@
 
 use log::{debug, info, warn};
 use std::error::Error;
-use uuid::Uuid;
 
 use tokio;
 use tokio::sync::broadcast;

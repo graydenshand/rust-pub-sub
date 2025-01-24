@@ -34,7 +34,7 @@ The client publishes a message containing a topic and a value.
 {"Publish": [["my-topic", {"Foo": 0.5}]]} # Nested value
 ```
 
-## Response
+## Receives
 
 Every message from the server will be a two element list containing the topic and the message.
 

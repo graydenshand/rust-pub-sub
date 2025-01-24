@@ -1,5 +1,5 @@
 // Size of all channel buffers
-pub const CHANNEL_BUFFER_SIZE: usize = 1_000_000;
+pub const CHANNEL_BUFFER_SIZE: usize = 10_000;
 
 // System published topics will use this prefix
 pub const SYSTEM_TOPIC_PREFIX: &'static str = "!system";

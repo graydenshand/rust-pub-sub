@@ -42,10 +42,12 @@ cannot know if a published message has delivered to all subscribers.
 
 There is no persistence, so a disconnected client cannot recover messages that it missed when it reconnects.
 
+Mostly this has been chosen to ensure the system is as lightweight and fast as possible.
 
 ## Load testing
 
-The CLI comes with two commands useful for load testing:
+The CLI comes with two commands useful for load testing. On my 2020 M1 Macbook Pro, I have reached processing rates
+beyond 1.7M commands per second - completely exhausting my CPU.
 
 ```sh
 cargo run -- log-metrics --address localhost:36912
@@ -79,3 +81,9 @@ For example, this is used for publishing server metrics.
 
 By default subscribing to all topics `*` will not match system topics. A client can subscribe to all system messages
 using the pattern `!system*`.
+
+## Protocol
+
+See `docs/protocol.md` for details on the interface between the client and server.
+
+Refer to `examples/python-client` for an example of interfacing with the server from Python. Given the protocol is a thin wrapper over msgpack, it's trivial to write a client in any language with a msgpack implementation.
