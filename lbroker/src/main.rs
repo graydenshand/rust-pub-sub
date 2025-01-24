@@ -5,13 +5,13 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 use env_logger;
-use g_pubsub::config;
+use lbroker::config;
 use log::info;
 use std::error::Error;
 use tokio;
 
-use g_pubsub::client::{test_client, Client};
-use g_pubsub::server::Server;
+use lbroker::client::{test_client, Client};
+use lbroker::server::Server;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -112,7 +112,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             client
                 .subscribe(&format!("{}/metrics/*", config::SYSTEM_TOPIC_PREFIX))
                 .await;
-            while let Some(m) = client.recv(None).await {
+            while let Some(m) = client.recv().await {
                 info!("{} - {}", m.topic, m.value.as_f64().unwrap())
             }
         }

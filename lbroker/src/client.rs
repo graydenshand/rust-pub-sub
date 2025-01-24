@@ -66,20 +66,9 @@ impl Client {
     ///
     /// Returns an interface::Message, or None when the connection has closed or timeout has
     /// been reached
-    pub async fn recv(
-        &mut self,
-        timeout: Option<tokio::time::Duration>,
-    ) -> Option<interface::Message> {
+    pub async fn recv(&mut self) -> Option<interface::Message> {
         if self.rx.is_some() {
-            tokio::select! {
-                message = self.rx.as_mut().unwrap().recv() => {
-                    message
-                },
-                _ = Self::optional_timeout(timeout) => {
-                    None
-                }
-
-            }
+            self.rx.as_mut().unwrap().recv().await
         } else {
             panic!("Cannot call recv on a clone")
         }
@@ -123,13 +112,11 @@ impl Client {
                 let (tx, rx) = mpsc::channel(config::CHANNEL_BUFFER_SIZE);
                 tokio::spawn(async move {
                     while let Some(m) = reader.next().await {
-                        match m {
-                            Ok(message) => tx
-                                .send(message)
-                                .await
-                                .expect("Message failed to send over channel"),
-                            Err(e) => panic!("Error {}", e),
-                        }
+                        let message = m.expect("Message was received");
+                        tx.send(message)
+                            .await
+                            .inspect_err(|e| debug!("Error sending message over channel: {}", e))
+                            .ok();
                     }
                 });
                 let (wtx, mut wrx) =
@@ -186,7 +173,7 @@ pub async fn test_client(
     // Event handlers
     let id_clone = id.to_string();
     let read_future = tokio::spawn(async move {
-        while let Some(message) = client.recv(None).await {
+        while let Some(message) = client.recv().await {
             let topic = message.topic;
             let value = message.value.to_string();
             debug!("Client #{id_clone} - Message received - {topic} - {value}",);

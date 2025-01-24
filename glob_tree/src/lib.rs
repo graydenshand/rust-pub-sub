@@ -5,7 +5,7 @@
 //! Each node in the tree represents a single character of a pattern.
 //!
 //! ## Example
-//! 
+//!
 //! Take the pattern 'fo*', if inserted into an empty tree the tree would look like this:
 //! ```txt
 //! root
@@ -20,7 +20,7 @@
 //! The asterisk "*" is a wildcard character, matching any characters any number of times. For example, the pattern
 //! `foo*` matches both `"food"` and `"football"`. A wildcard isn't limited to the end of the string, for example the
 //! pattern `fo*l` would match the strings `"fool"` and `"foil"`, but not `"focus"`.
-//! 
+//!
 //! The question mark "?" a wildcard character that can be used exactly once. For example, the pattern `foo?` would
 //! match `"food"` but not `"football"`.
 //!
@@ -33,8 +33,8 @@
 //! - a token (char)
 //! - a reference count, indicating the number of distinct patterns that include that same node
 //! - a collection of child nodes
-//! 
-//! 
+//!
+//!
 //! ```rs
 //! let tree = GlobTree::new();
 //! tree.insert('foo*')
