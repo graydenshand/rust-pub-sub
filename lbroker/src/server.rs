@@ -159,8 +159,11 @@ fn spawn_subscription_manager(
                                 // Increment messages_sent metric
                                 metrics.messages_sent.increment().await;
 
-                                // Send the message through the adapter
-                                adapter_sender.send(m).await.inspect_err(|e| warn!("Failed to send message to adapter - {e}")).ok();
+                                // Send the message through the adapter, if an error occurs the adapter is closed - exit
+                                match adapter_sender.send(m).await {
+                                    Ok(_) => (),
+                                    Err(_) => return
+                                };
                             }
                         }
                     }
@@ -180,6 +183,8 @@ fn spawn_subscription_manager(
                             },
                             Command::Publish { .. } => ()
                         }
+                    } else {
+                        return
                     }
                 }
             }

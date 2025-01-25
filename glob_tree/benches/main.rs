@@ -41,10 +41,11 @@ pub fn check_pattern_size_regex(c: &mut Criterion) {
         pattern.push('b');
         let re = Regex::new(&pattern).unwrap();
         group.throughput(Throughput::Elements(i as u64));
-        group.bench_function(BenchmarkId::from_parameter(i), |b| b.iter(|| Regex::find(&re, &s)));  
+        group.bench_function(BenchmarkId::from_parameter(i), |b| {
+            b.iter(|| Regex::find(&re, &s))
+        });
     }
 }
-
 
 pub fn check_string_size_regex(c: &mut Criterion) {
     let pattern = r"a.*b";
@@ -55,10 +56,11 @@ pub fn check_string_size_regex(c: &mut Criterion) {
         let mut s = std::iter::repeat("a").take(i).collect::<String>();
         s.push('b');
         group.throughput(Throughput::Elements(i as u64));
-        group.bench_function(BenchmarkId::from_parameter(i), |b| b.iter(|| Regex::find(&re, &s)));
+        group.bench_function(BenchmarkId::from_parameter(i), |b| {
+            b.iter(|| Regex::find(&re, &s))
+        });
     }
 }
-
 
 pub fn check_many_patterns(c: &mut Criterion) {
     let mut t = GlobTree::new();
@@ -68,7 +70,7 @@ pub fn check_many_patterns(c: &mut Criterion) {
         let mut pattern = std::iter::repeat("a").take(i).collect::<String>();
         pattern.push('b');
         t.insert(&pattern);
-        let mut s = std::iter::repeat("a").take(i*2).collect::<String>();
+        let mut s = std::iter::repeat("a").take(i * 2).collect::<String>();
         s.push('b');
         if i % 10 == 0 {
             group.throughput(Throughput::Elements(i as u64));
@@ -85,16 +87,24 @@ pub fn check_many_patterns_regex(c: &mut Criterion) {
         let mut pattern = std::iter::repeat("a").take(i).collect::<String>();
         pattern.push('b');
         patterns.push(pattern);
-        let combined_pattern = Regex::new(&patterns.iter().map(|p| format!("({p})")).collect::<Vec<String>>().join("|")).unwrap();
-        let mut s = std::iter::repeat("a").take(i*2).collect::<String>();
+        let combined_pattern = Regex::new(
+            &patterns
+                .iter()
+                .map(|p| format!("({p})"))
+                .collect::<Vec<String>>()
+                .join("|"),
+        )
+        .unwrap();
+        let mut s = std::iter::repeat("a").take(i * 2).collect::<String>();
         s.push('b');
         if i % 10 == 0 {
             group.throughput(Throughput::Elements(i as u64));
-            group.bench_function(BenchmarkId::from_parameter(i), |b| b.iter(|| Regex::captures(&combined_pattern, &s)));
+            group.bench_function(BenchmarkId::from_parameter(i), |b| {
+                b.iter(|| Regex::captures(&combined_pattern, &s))
+            });
         }
     }
 }
-
 
 // criterion_group!(benches, check_pattern_size, check_string_size, check_pattern_size_regex, check_string_size_regex);
 // criterion_group!(benches, check_pattern_size_regex, check_string_size_regex);

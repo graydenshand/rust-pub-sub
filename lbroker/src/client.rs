@@ -162,7 +162,6 @@ pub async fn test_client(
     );
 }
 
-
 /// Send some load to a server
 fn test_client_write_loop(
     client: Client,
