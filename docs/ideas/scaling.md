@@ -18,7 +18,7 @@ There is an upper bound to this approach, because at some point simply the numbe
 the fanout factor a single machine can handle.
 
 I see two paths to address _that_ issue:
-1) Use a write ahead log -- avoids the problem of fanout entirely (but possibly higher performance costs)
+1) Use a write ahead log -- avoids the problem of fanout entirely at the cost of performance
 2) Intelligent server network -- instead of a single layer of a network structure where every server is connected to the others, use a more sparse structure and intelligent message forwarding to broadcast messages
     - E.g. with 3 servers A,B,C don't send from A->B and A->C, instead send A->B, B->C
     - This could theoretically allow the network to propagate a message to an unlimited number of clients, though with deteriorating performance.

@@ -176,10 +176,8 @@ fn spawn_subscription_manager(
                                 subscriptions.insert(&pattern);
                             },
                             Command::Unsubscribe { pattern } => {
-                                match subscriptions.remove(&pattern) {
-                                    Ok(_) => (),
-                                    Err(e) => {warn!("{}", e)}
-                                };
+                                // error is only raised if the pattern is not found
+                                subscriptions.remove(&pattern).ok();
                             },
                             Command::Publish { .. } => ()
                         }

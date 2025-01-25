@@ -128,8 +128,7 @@ impl Node {
         // Skip this if token is None (root node)
         if let Some(t) = self.token {
             if let Some(c) = chars.next() {
-                // if the next character doesn't match the current character or a wild card, exit
-                // One exception is made for when there is an active multi-character wildcard
+                // if the next character in pattern doesn't match the current character in string or a wild card, exit
                 if ![c, MULTI_CHARACTER_WILDCARD, SINGLE_CHARACTER_WILDCARD].contains(&t) {
                     // Doesn't match
                     return None;
@@ -159,7 +158,7 @@ impl Node {
 
                 // No match on single-char wildcard, check for active multi-char wildcard.
                 // skips appending the token to the pattern, and instead re-invokes using the new string but same pattern
-                if let Some(t) = self.token {
+                if let Some(t) = self.token{
                     if t == MULTI_CHARACTER_WILDCARD {
                         if let Some(s) = self._match_string_worker(&next_string, pattern.clone()) {
                             return Some(s);

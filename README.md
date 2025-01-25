@@ -35,27 +35,16 @@ cargo run -r -- server -p 36912
 
 ## Delivery guarantees
 
-lbroker promises at-most-once delivery.
+There are some policies that users should be aware of:
 
-The client and server communicate asynchronously over a TCP stream, with no request/response protocol, so the client
-cannot know if a published message has delivered to all subscribers.
+- lbroker promises at-most-once delivery.
+- The client and server communicate asynchronously over a TCP stream. With no request/response protocol, the client cannot know if a published message has been received by the server or delivered to all subscribers.
+- There is no persistence, so a disconnected client cannot recover messages that it missed when it reconnects.
+- The server maintains a small buffer of messages it has received, and a cursor for each client indicating the last message it's received. When full, the oldest message is deteled from the buffer. The cursors of clients that have fallen behind the oldest message are moved to the most recent message, skipping over the other messages in the buffer. Effectively, if a client doesn't process the messages it receives as fast as the server is sending them, it will not receive all messages messages.
 
-There is no persistence, so a disconnected client cannot recover messages that it missed when it reconnects.
+## Test client
 
-Mostly this has been chosen to ensure the system is as lightweight and fast as possible.
-
-## Load testing
-
-The CLI comes with two commands useful for load testing. On my 2020 M1 Macbook Pro, I have reached processing rates
-beyond 1.7M commands per second - completely exhausting my CPU.
-
-```sh
-cargo run -- log-metrics --address localhost:36912
-```
-
-This first command logs server metrics to the terminal. The server publishes metrics to the `!system/metrics` topic
-prefix.
-
+The CLI comes with a test client that can be used to send some load to a server.
 
 ```sh
 cargo run  -r -- test-client --address localhost:36912 --number 30 --interval 0.01 --subscribe 'a'
@@ -72,18 +61,27 @@ can be used to control the server's fan-out factor. 30 clients subscribing to th
 sent to the server must be delivered 30 times; with 60 clients subsribing to both the `a` and `b` topics each message
 must be delivered 120 times.
 
+## Server metrics
+
+The server publishes metrics to the `!system/metrics` topic prefix, and the CLI comes with a command to log these metrics.
+
+```sh
+cargo run -- log-metrics --address localhost:36912
+```
+
 ## System topic prefix
 
-The system uses the namespace `!system` for the topics it publishes. While not prohibited, it's best to avoid publishing
-to topics with that prefix.
+While not prohibited, it's advised to avoid publishing to topics with the `!system` prefix.
 
-For example, this is used for publishing server metrics.
+By default subscribing to all topics `*` will not match system topics. A client can subscribe to all system messages using the pattern `!system*`.
 
-By default subscribing to all topics `*` will not match system topics. A client can subscribe to all system messages
-using the pattern `!system*`.
-
-## Protocol
+## Protocol & Multi language support
 
 See `docs/protocol.md` for details on the interface between the client and server.
 
 Refer to `examples/python-client` for an example of interfacing with the server from Python. Given the protocol is a thin wrapper over msgpack, it's trivial to write a client in any language with a msgpack implementation.
+
+## GlobTree
+
+This repo also contains a crate named `glob-tree` containing a data structure for efficiently matching a string against a collection of glob patterns. It is used by lbroker to filter which message is sent to each client per its subscriptions.
+
