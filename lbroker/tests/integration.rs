@@ -1,6 +1,7 @@
 use std::fmt::format;
 
 use lbroker;
+use lbroker::buffer_config::BufferConfig;
 use rmpv::Value;
 use tokio;
 
@@ -43,7 +44,7 @@ async fn it_publishes_and_receives_messages() {
     ];
 
     // Start server
-    let mut server = lbroker::server::Server::new(port)
+    let mut server = lbroker::server::Server::new(port, BufferConfig::default())
         .await
         .expect("Server can bind to address");
     tokio::spawn(async move {

@@ -16,8 +16,9 @@ log = "0.4.21"
 futures = "0.3.30"
 clap = { version = "4.5.6", features = ["derive"] }
 tokio-util = { version = "0.7.12", features = ["net", "codec"] }
-tokio-stream = "0.1.16"
+tokio-stream = { version = "0.1.16", features = ["sync"] }
 glob-tree = { path = "../glob_tree" }
+dashmap = "6.1"
 
 [dev-dependencies]
 criterion = { version = "0.3", features = ["async_tokio"] }

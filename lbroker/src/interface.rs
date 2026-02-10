@@ -24,7 +24,7 @@ pub enum Command {
     Publish { message: Message },
     /// Subscribe to a topic
     Subscribe { pattern: String },
-    /// Subscribe to a topic
+    /// Unsubscribe from a topic
     Unsubscribe { pattern: String },
 }
 impl fmt::Display for Command {

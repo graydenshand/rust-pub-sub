@@ -4,7 +4,7 @@ A fast & flexible Pub/Sub broker, with a lightweight protocol over msgpack.
 
 ## Status
 
-Work in progress.
+This is an experimental project.
 
 ## Example
 
@@ -38,9 +38,11 @@ cargo run -r -- server -p 36912
 There are some policies that users should be aware of:
 
 - lbroker promises at-most-once delivery.
-- The client and server communicate asynchronously over a TCP stream. With no request/response protocol, the client cannot know if a published message has been received by the server or delivered to all subscribers.
-- There is no persistence, so a disconnected client cannot recover messages that it missed when it reconnects.
-- The server maintains a small buffer of messages it has received, and a cursor for each client indicating the last message it's received. When full, the oldest message is deteled from the buffer. The cursors of clients that have fallen behind the oldest message are moved to the most recent message, skipping over the other messages in the buffer. Effectively, if a client doesn't process the messages it receives as fast as the server is sending them, it will not receive all messages messages.
+- The client and server communicate asynchronously. With no request/response protocol, the client cannot know if a published message has been received by the server or delivered to all subscribers.
+- There is no persistence, so a disconnected client cannot recover messages that it missed when it reconnects. The one exception to this is that the server will retain the last message sent on a topic and immediately send it to a client that subscribes to the topic.
+- The server maintains a small buffer of messages it has received, and a cursor for each client indicating the last message it's received. When full, the oldest message is deteled from the buffer. The cursors of clients that have fallen behind the oldest message are moved to the most recent message, skipping over the other messages in the buffer. Effectively, if a client doesn't process the messages it receives as fast as the server is sending them, it will not receive all of the messages.
+
+All of these characteristics reflect the intended use of this application as a broker for publishing *state* rather than *state changes*. For example, consider a weather station publishing measurements every second. Or clients of a video game publishing their position every frame.
 
 ## Test client
 
@@ -84,4 +86,3 @@ Refer to `examples/python-client` for an example of interfacing with the server 
 ## GlobTree
 
 This repo also contains a crate named `glob-tree` containing a data structure for efficiently matching a string against a collection of glob patterns. It is used by lbroker to filter which message is sent to each client per its subscriptions.
-

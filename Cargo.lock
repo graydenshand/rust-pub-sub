@@ -1311,6 +1311,7 @@ dependencies = [
  "bytes",
  "clap 4.5.6",
  "criterion",
+ "dashmap",
  "env_logger",
  "flamegraph",
  "futures",
@@ -2463,6 +2464,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

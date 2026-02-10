@@ -141,13 +141,31 @@ pub async fn test_client(
     let topics = "abcdefg".chars().collect::<Vec<char>>();
     let write_future = test_client_write_loop(client.clone(), topics, interval);
 
-    // Event handlers
+    // Event handlers with message counting
     let id_clone = id.to_string();
     let read_future = tokio::spawn(async move {
+        let mut msg_count = 0u64;
+        let mut last_report = tokio::time::Instant::now();
+        let report_interval = tokio::time::Duration::from_secs(5);
+
         while let Some(message) = client.recv().await {
+            msg_count += 1;
             let topic = message.topic;
             let value = message.value.to_string();
-            debug!("Client #{id_clone} - Message received - {topic} - {value}",);
+            debug!("Client #{id_clone} - Message received - {topic} - {value}");
+
+            // Periodic stats reporting
+            let now = tokio::time::Instant::now();
+            if now.duration_since(last_report) >= report_interval {
+                let elapsed = now.duration_since(last_report).as_secs_f64();
+                let rate = msg_count as f64 / elapsed;
+                info!(
+                    "Client #{id_clone} - Received {} msgs ({:.0} msgs/sec)",
+                    msg_count, rate
+                );
+                msg_count = 0;
+                last_report = now;
+            }
         }
         panic!("Unexpectedly stopped receiving messages.")
     });
