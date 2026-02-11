@@ -29,10 +29,12 @@
 //! - Pub sub: Filtering messages sent to a client by checking the message topic against a tree of subscription patterns
 //! - File system scanning: searching over a file system for files matching a set of patterns
 //!
-//! ```rs
-//! let tree = GlobTree::new();
-//! tree.insert('foo*')
-//! assert!(tree.check("food") == Some("foo*".into()))
+//! ```
+//! use glob_tree::GlobTree;
+//!
+//! let mut tree = GlobTree::new();
+//! tree.insert("foo*");
+//! assert!(tree.check("food"));
 //! ```
 
 use std::clone::Clone;
@@ -41,7 +43,7 @@ use std::collections::BTreeMap;
 const MULTI_CHARACTER_WILDCARD: char = '*';
 const SINGLE_CHARACTER_WILDCARD: char = '?';
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 struct Node {
     // Token to store in this node
     token: Option<char>,
@@ -50,8 +52,9 @@ struct Node {
     /// Count of patterns which include this node
     count: u64,
 }
+
 impl Node {
-    fn new(token: Option<char>) -> Node {
+    fn new(token: Option<char>) -> Self {
         Node {
             token,
             children: BTreeMap::new(),
@@ -89,106 +92,100 @@ impl Node {
     ///
     /// Recursively appends child characters
     fn list_strings(&self) -> Vec<String> {
-        self._list_strings_worker("".into())
-    }
-
-    // Recursive target for list_strings() method
-    fn _list_strings_worker(&self, mut string: String) -> Vec<String> {
-        // Create output vector
         let mut strings = vec![];
-
-        // Append this node's token token (don't do anything if root node)
-        if let Some(token) = self.token {
-            string.push(token);
-        }
-        // If this node terminates a string, append string to the output
-        if self.is_terminal() {
-            strings.push(string.clone())
-        }
-
-        // Get strings of all child nodes, and append to output
-        for child in self.children.values() {
-            let mut child_strings = child._list_strings_worker(string.clone());
-            strings.append(&mut child_strings);
-        }
-
+        let mut buffer = String::new();
+        self._list_strings_worker(&mut strings, &mut buffer);
         strings
     }
 
-    /// Search tree starting from this node for pattern matching the given string
-    fn match_string(&self, s: &str) -> Option<String> {
-        let pattern = String::new();
-        self._match_string_worker(s, pattern)
+    // Recursive target for list_strings() method
+    fn _list_strings_worker(&self, strings: &mut Vec<String>, buffer: &mut String) {
+        // Append this node's token (don't do anything if root node)
+        if let Some(token) = self.token {
+            buffer.push(token);
+        }
+
+        // If this node terminates a string, save current buffer to output
+        if self.is_terminal() {
+            strings.push(buffer.clone());
+        }
+
+        // Get strings of all child nodes
+        for child in self.children.values() {
+            child._list_strings_worker(strings, buffer);
+        }
+
+        // Pop the character we added
+        if self.token.is_some() {
+            buffer.pop();
+        }
     }
 
-    fn _match_string_worker(&self, s: &str, pattern: String) -> Option<String> {
-        let mut chars = s.chars().peekable();
-        let mut next_pattern = pattern.clone();
+    /// Search tree starting from this node for pattern matching the given string
+    fn match_string(&self, s: &str) -> bool {
+        self._match_string_worker(s.as_bytes(), 0)
+    }
 
+    fn _match_string_worker(&self, s: &[u8], pos: usize) -> bool {
         // Skip this if token is None (root node)
         if let Some(t) = self.token {
-            if let Some(c) = chars.next() {
-                // if the next character in pattern doesn't match the current character in string or a wild card, exit
-                if ![c, MULTI_CHARACTER_WILDCARD, SINGLE_CHARACTER_WILDCARD].contains(&t) {
-                    // Doesn't match
-                    return None;
-                };
-                next_pattern.push(t);
+            if pos >= s.len() {
+                // End of string but pattern continues
+                return false;
             }
-        };
 
-        let next_string = chars.clone().collect::<String>();
-
-        let next_char = chars.peek();
-        match next_char {
-            Some(c) => {
-                // Check for direct child
-                if let Some(node) = self.children.get(&c) {
-                    if let Some(s) = node._match_string_worker(&next_string, next_pattern.clone()) {
-                        return Some(s);
-                    }
-                }
-
-                // No match on next char in string, check single-char wildcard
-                if let Some(node) = self.children.get(&SINGLE_CHARACTER_WILDCARD) {
-                    if let Some(s) = node._match_string_worker(&next_string, next_pattern.clone()) {
-                        return Some(s);
-                    }
-                }
-
-                // No match on single-char wildcard, check for active multi-char wildcard.
-                // skips appending the token to the pattern, and instead re-invokes using the new string but same pattern
-                if let Some(t) = self.token{
-                    if t == MULTI_CHARACTER_WILDCARD {
-                        if let Some(s) = self._match_string_worker(&next_string, pattern.clone()) {
-                            return Some(s);
-                        }
-                    }
-                }
-
-                // No match on active multi-char wildcard, check for new multi-char wildcard
-                if let Some(node) = self.children.get(&MULTI_CHARACTER_WILDCARD) {
-                    if let Some(s) = node._match_string_worker(&next_string, next_pattern.clone()) {
-                        return Some(s);
-                    }
-                }
+            let c = s[pos] as char;
+            // if the next character in pattern doesn't match the current character in string or a wild card, exit
+            if ![c, MULTI_CHARACTER_WILDCARD, SINGLE_CHARACTER_WILDCARD].contains(&t) {
                 // Doesn't match
-                None
+                return false;
             }
-            // End of string, check if pattern is terminal
-            None => {
-                if self.is_terminal() {
-                    Some(next_pattern)
-                } else {
-                    // Doesn't match
-                    None
+        }
+
+        let next_pos = if self.token.is_some() { pos + 1 } else { pos };
+
+        if next_pos < s.len() {
+            let next_char = s[next_pos] as char;
+            // Check for direct child
+            if let Some(node) = self.children.get(&next_char) {
+                if node._match_string_worker(s, next_pos) {
+                    return true;
                 }
             }
+
+            // No match on next char in string, check single-char wildcard
+            if let Some(node) = self.children.get(&SINGLE_CHARACTER_WILDCARD) {
+                if node._match_string_worker(s, next_pos) {
+                    return true;
+                }
+            }
+
+            // No match on single-char wildcard, check for active multi-char wildcard.
+            // skips appending the token to the pattern, and instead re-invokes using the new string but same pattern
+            if let Some(t) = self.token {
+                if t == MULTI_CHARACTER_WILDCARD {
+                    if self._match_string_worker(s, next_pos) {
+                        return true;
+                    }
+                }
+            }
+
+            // No match on active multi-char wildcard, check for new multi-char wildcard
+            if let Some(node) = self.children.get(&MULTI_CHARACTER_WILDCARD) {
+                if node._match_string_worker(s, next_pos) {
+                    return true;
+                }
+            }
+            // Doesn't match
+            false
+        } else {
+            // End of string, check if pattern is terminal
+            self.is_terminal()
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Default)]
 pub struct GlobTree {
     root: Node,
 }
@@ -196,7 +193,11 @@ impl GlobTree {
     /// Create a new, empty tree
     pub fn new() -> GlobTree {
         GlobTree {
-            root: Node::new(None),
+            root: Node {
+                token: None,
+                children: BTreeMap::new(),
+                count: 0,
+            },
         }
     }
 
@@ -216,18 +217,21 @@ impl GlobTree {
                 }
             }
         }
+        // Increment count on final node to mark pattern as terminal
+        // For empty patterns, this increments root; for others, the last character node
+        cursor.increment_count();
     }
 
     /// Check if a string is matched by a pattern in this tree
-    pub fn check(&self, s: &str) -> Option<String> {
+    pub fn check(&self, s: &str) -> bool {
         self.root.match_string(s)
     }
 
     /// Returns true if tree contains pattern
-    fn contains(&mut self, pattern: &str) -> bool {
-        let mut cursor = &mut self.root;
+    pub fn contains(&self, pattern: &str) -> bool {
+        let mut cursor = &self.root;
         for c in pattern.chars() {
-            let child = cursor.children.get_mut(&c);
+            let child = cursor.children.get(&c);
             if child.is_none() {
                 return false;
             }
@@ -236,7 +240,7 @@ impl GlobTree {
         // Reached end of pattern, but tree may continue if there are overlapping patterns.
         // If the reference count of this node's children is less than the reference count of this node
         // then we know the tree contains a pattern that terminates on this node
-        return cursor.is_terminal();
+        cursor.is_terminal()
     }
 
     /// List all patterns in the tree
@@ -252,14 +256,14 @@ impl GlobTree {
         // Delete subscription from Tree
         let mut cursor = &mut self.root;
         for c in pattern.chars() {
-            let child = cursor.children.get_mut(&c).unwrap();
+            let child = cursor.children.get(&c).unwrap();
             if child.count == 1 {
                 // Only one reference to this token, can delete node and all children
                 cursor.children.remove(&c);
                 return Ok(());
             } else {
-                // This token is referenced elsewhere, decrement_count count and do nothing
-                child.decrement_count();
+                // This token is referenced elsewhere, decrement count and do nothing
+                cursor.children.get_mut(&c).unwrap().decrement_count();
                 cursor = cursor.children.get_mut(&c).unwrap();
             }
         }
@@ -274,26 +278,26 @@ mod tests {
     #[test]
     fn test_check() {
         let mut t = GlobTree::new();
-        assert_eq!(t.check("metrics"), None);
+        assert!(!t.check("metrics"));
         t.insert("metrics");
-        assert_eq!(t.check("metrics"), Some("metrics".into()));
+        assert!(t.check("metrics"));
     }
 
     #[test]
     fn test_remove() {
         let mut t = GlobTree::new();
         t.insert("metrics");
-        assert_eq!(t.check("metrics"), Some("metrics".into()));
+        assert!(t.check("metrics"));
         t.remove("metrics").unwrap();
         assert!(t.root.children.is_empty());
-        assert!(t.check("metrics").is_none());
+        assert!(!t.check("metrics"));
     }
 
     #[test]
     fn test_wildcard_simple() {
         let mut t = GlobTree::new();
         t.insert(&MULTI_CHARACTER_WILDCARD.to_string());
-        assert!(t.check("foo").is_some());
+        assert!(t.check("foo"));
     }
 
     #[test]
@@ -301,17 +305,17 @@ mod tests {
         let mut t = GlobTree::new();
         let pattern = format!("fooo{}ar", MULTI_CHARACTER_WILDCARD);
         t.insert(&pattern);
-        assert!(t.check("fooozar".into()).is_some());
-        assert_eq!(t.check("fooo/zbasfjadfasldfjah/ar".into()), Some(pattern));
-        assert!(t.check("fooo/zbasfjadfasldfjah/".into()).is_none());
-        assert!(t.check("fooozarnt".into()).is_none());
+        assert!(t.check("fooozar"));
+        assert!(t.check("fooo/zbasfjadfasldfjah/ar"));
+        assert!(!t.check("fooo/zbasfjadfasldfjah/"));
+        assert!(!t.check("fooozarnt"));
     }
 
     #[test]
     fn test_partial_match() {
         let mut t = GlobTree::new();
         t.insert("testing");
-        assert!(t.check("test".into()).is_none());
+        assert!(!t.check("test"));
     }
 
     #[test]
@@ -319,21 +323,21 @@ mod tests {
         let mut t = GlobTree::new();
         t.insert("testing");
         t.insert("test");
-        assert_eq!(t.check("test".into()), Some("test".into()));
+        assert!(t.check("test"));
     }
 
     #[test]
     fn test_contains() {
         let mut t = GlobTree::new();
         t.insert("testing");
-        assert!(t.contains("testing".into()));
+        assert!(t.contains("testing"));
     }
 
     #[test]
     fn test_doesnt_contain_substring() {
         let mut t = GlobTree::new();
         t.insert("testing");
-        assert!(!t.contains("test".into()));
+        assert!(!t.contains("test"));
     }
 
     #[test]
@@ -387,8 +391,8 @@ mod tests {
     fn test_fixed_length_wildcard_simple() {
         let mut t = GlobTree::new();
         t.insert("ab?d");
-        assert!(t.check("abcd").is_some());
-        assert!(t.check("abccd").is_none());
+        assert!(t.check("abcd"));
+        assert!(!t.check("abccd"));
     }
 
     #[test]
@@ -396,14 +400,14 @@ mod tests {
         let mut t = GlobTree::new();
         t.insert("ab?d");
         t.insert("ab*");
-        assert!(t.check("abcd") == Some("ab?d".into()));
-        assert!(t.check("abccd") == Some("ab*".into()));
+        assert!(t.check("abcd"));
+        assert!(t.check("abccd"));
     }
 
     #[test]
     fn test_empty_string_matches_empty_pattern() {
         let mut t = GlobTree::new();
         t.insert("");
-        assert!(t.check("") == Some("".into()));
+        assert!(t.check(""));
     }
 }
