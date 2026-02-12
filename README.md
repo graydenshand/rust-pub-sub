@@ -71,12 +71,6 @@ The server publishes metrics to the `!system/metrics` topic prefix, and the CLI 
 cargo run -- log-metrics --address localhost:36912
 ```
 
-## System topic prefix
-
-While not prohibited, it's advised to avoid publishing to topics with the `!system` prefix.
-
-By default subscribing to all topics `*` will not match system topics. A client can subscribe to all system messages using the pattern `!system*`.
-
 ## Protocol & Multi language support
 
 See `docs/protocol.md` for details on the interface between the client and server.

@@ -23,15 +23,15 @@ impl PerformanceMode {
     pub fn to_config(self) -> BufferConfig {
         match self {
             PerformanceMode::LowLatency => BufferConfig {
-                size: 4 * 1024,         // 4 KB
+                size: 4 * 1024, // 4 KB
                 flush_strategy: FlushStrategy::Immediate,
             },
             PerformanceMode::Balanced => BufferConfig {
-                size: 32 * 1024,        // 32 KB
+                size: 32 * 1024, // 32 KB
                 flush_strategy: FlushStrategy::Periodic { interval_ms: 10 },
             },
             PerformanceMode::HighThroughput => BufferConfig {
-                size: 128 * 1024,       // 128 KB
+                size: 128 * 1024, // 128 KB
                 flush_strategy: FlushStrategy::Auto,
             },
         }

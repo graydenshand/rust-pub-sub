@@ -1,11 +1,8 @@
 //! Safe cross task metrics
 
-use crate::interface::Message;
-use log::warn;
-use rmpv::Value;
-use std::error::Error;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 use tokio::time::Instant;
+use tracing::info;
 
 use crate::config;
 
@@ -17,26 +14,26 @@ pub trait Metric {
     fn new(name: &str, interval: tokio::time::Duration) -> Self;
 
     /// Listen for updates from associated mutators
-    async fn listen(&mut self) -> Result<(), Box<dyn Error>>;
+    async fn listen(&mut self) -> !;
 
-    /// Broadcast metric to channel
-    fn broadcast(&mut self, message_sender: &broadcast::Sender<Message>);
+    /// Log metric using the log crate
+    fn log_metric(&mut self);
 
-    /// Interval between broadcasts of this metric
-    fn broadcast_interval(&self) -> tokio::time::Duration;
+    /// Interval between log outputs of this metric
+    fn log_interval(&self) -> tokio::time::Duration;
 
-    /// Listen for updates and broadcast to channel on a set interval
-    async fn listen_and_broadcast(&mut self, message_sender: broadcast::Sender<Message>) {
-        let interval = self.broadcast_interval();
+    /// Listen for updates and log on a set interval
+    async fn listen_and_log(&mut self) {
+        let interval = self.log_interval();
         loop {
             tokio::select! {
                 // Listen for mutations from connections
-                result = self.listen() => {
-                    result.unwrap()
+                _ = self.listen() => {
+                    unreachable!()
                 }
                 // Wake up periodically to log metrics
                 _ = tokio::time::sleep(interval) => {
-                    self.broadcast(&message_sender)
+                    self.log_metric();
                 }
             }
         }
@@ -107,7 +104,7 @@ impl Metric for Throughput {
     }
 
     /// Listen for updates
-    async fn listen(&mut self) -> Result<(), Box<dyn Error>> {
+    async fn listen(&mut self) -> ! {
         self.start = Some(Instant::now());
         loop {
             let i = self.receiver.recv().await.unwrap();
@@ -115,21 +112,20 @@ impl Metric for Throughput {
         }
     }
 
-    /// Broadcast metric to channel
-    fn broadcast(&mut self, message_sender: &broadcast::Sender<Message>) {
-        // Report value and rate
-        broadcast_metric(&message_sender, &self.name, self.value().clone());
-        broadcast_metric(
-            &message_sender,
-            &format!("{}-per-second", self.name),
-            self.rate(),
+    /// Log metric
+    fn log_metric(&mut self) {
+        let rate = self.rate();
+        info!(
+            metric = %self.name,
+            value = self.value,
+            per_second = %format!("{:.2}", rate),
         );
         // Reset the metric
         self.reset();
     }
 
-    /// Interval to wait between broadcasts
-    fn broadcast_interval(&self) -> tokio::time::Duration {
+    /// Interval to wait between log outputs
+    fn log_interval(&self) -> tokio::time::Duration {
         self.interval
     }
 }
@@ -206,7 +202,7 @@ impl Metric for Count {
     }
 
     /// Listen for updates from mutators
-    async fn listen(&mut self) -> Result<(), Box<dyn Error>> {
+    async fn listen(&mut self) -> ! {
         loop {
             let i = self.receiver.recv().await.unwrap();
             if i >= 0 {
@@ -222,13 +218,16 @@ impl Metric for Count {
         &self.value
     }
 
-    /// Broadcast this metric to a channel
-    fn broadcast(&mut self, message_sender: &broadcast::Sender<Message>) {
-        broadcast_metric(&message_sender, &self.name, self.value().clone());
+    /// Log metric
+    fn log_metric(&mut self) {
+        info!(
+            metric = %self.name,
+            value = self.value,
+        );
     }
 
-    /// Interval to wait between broadcasts of this metric
-    fn broadcast_interval(&self) -> tokio::time::Duration {
+    /// Interval to wait between log outputs of this metric
+    fn log_interval(&self) -> tokio::time::Duration {
         self.interval
     }
 }
@@ -242,19 +241,4 @@ impl Count {
     pub fn subtract(&mut self, n: u64) {
         self.value -= n;
     }
-}
-
-/// Broadcast a metric to a channel
-fn broadcast_metric<T>(message_sender: &broadcast::Sender<Message>, metric: &str, value: T)
-where
-    rmpv::Value: From<T>,
-{
-    let m1 = Message {
-        topic: format!("{}/metrics/{metric}", config::SYSTEM_TOPIC_PREFIX),
-        value: Value::from(value.into()),
-    };
-    message_sender
-        .send(m1)
-        .inspect_err(|e| warn!("Failed to public metric - {metric} - {e}"))
-        .ok();
 }

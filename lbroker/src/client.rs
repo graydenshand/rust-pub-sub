@@ -1,7 +1,7 @@
 //! A client to publish and receive messages from a server
 
-use log::{debug, info};
 use tokio::net::TcpStream;
+use tracing::{debug, info};
 
 use crate::config;
 use crate::interface;

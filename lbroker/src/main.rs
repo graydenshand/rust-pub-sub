@@ -5,14 +5,13 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
-use env_logger;
 use lbroker::buffer_config::{BufferConfig, FlushStrategy};
-use lbroker::config;
-use log::info;
 use std::error::Error;
 use tokio;
+use tracing::info;
+use tracing_subscriber::EnvFilter;
 
-use lbroker::client::{test_client, Client};
+use lbroker::client::test_client;
 use lbroker::server::Server;
 
 #[derive(Parser)]
@@ -29,6 +28,10 @@ struct Cli {
     #[arg(short, long, action = clap::ArgAction::Count)]
     debug: u8,
 
+    /// json logging
+    #[arg(long)]
+    json: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -38,7 +41,7 @@ enum Commands {
     /// Run the server
     Server {
         /// Port to listen on
-        #[arg(short, long)]
+        #[arg(short, long, default_value = "36912")]
         port: u16,
 
         /// Performance mode preset (low-latency, balanced, high-throughput)
@@ -76,23 +79,23 @@ enum Commands {
         #[arg(short, long)]
         interval: Option<f64>,
     },
-
-    /// Log metrics published by the server
-    LogMetrics {
-        /// address to send messages to
-        #[arg(short, long)]
-        address: String,
-    },
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let cli: Cli = Cli::parse();
+
     let log_level = match cli.debug {
         0 => "info",
         _ => "debug",
     };
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level)).init();
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level));
+    let logger = tracing_subscriber::fmt().with_env_filter(filter);
+    if cli.json {
+        logger.json().init();
+    } else {
+        logger.init();
+    }
 
     match &cli.command {
         Some(Commands::Server {
@@ -181,16 +184,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 f.await.unwrap();
             }
         }
-        Some(Commands::LogMetrics { address }) => {
-            let mut client = Client::new(address.to_string()).await;
-            client
-                .subscribe(&format!("{}/metrics/*", config::SYSTEM_TOPIC_PREFIX))
-                .await;
-            while let Some(m) = client.recv().await {
-                info!("{} - {}", m.topic, m.value.as_f64().unwrap())
-            }
+
+        None => {
+            panic!("No command provided. Use --help for usage information.");
         }
-        None => {}
     };
 
     Ok(())

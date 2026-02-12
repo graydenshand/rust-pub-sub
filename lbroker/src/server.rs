@@ -5,7 +5,7 @@
 //! It is designed to support multiple transport protocols (eg. Tcp, Udp, Websockets).
 
 use crate::buffer_config::BufferConfig;
-use log::{debug, warn};
+use tracing::{debug, warn};
 
 use std::error::Error;
 use std::sync::Arc;
@@ -201,12 +201,20 @@ impl ConnectionHandler {
 
         loop {
             tokio::select! {
-                Some(command) = self.adapter_receiver.recv() => {
-                    self.metrics.command_throughput.increment().await;
-                    debug!("{}", command);
+                command = self.adapter_receiver.recv() => {
+                    match command {
+                        Some(cmd) => {
+                            self.metrics.command_throughput.increment().await;
+                            cmd.log();
 
-                    if !self.handle_command(command).await {
-                        break;
+                            if !self.handle_command(cmd).await {
+                                break;
+                            }
+                        }
+                        None => {
+                            // Client disconnected - adapter_receiver closed
+                            break;
+                        }
                     }
                 }
 
@@ -227,8 +235,6 @@ impl ConnectionHandler {
                         }
                     }
                 }
-
-                else => break,
             }
         }
 
@@ -258,7 +264,7 @@ impl ConnectionHandler {
 
         // Subscribe to all existing topics that match this pattern
         for topic_name in self.bus.list_topics() {
-            if self.subscriptions.check(&topic_name).is_some() {
+            if self.subscriptions.check(&topic_name) {
                 self.subscribe_to_topic(topic_name);
             }
         }
@@ -270,7 +276,7 @@ impl ConnectionHandler {
         // Unsubscribe from topics that no longer match any pattern
         let subscribed_topics: Vec<Arc<str>> = self.topic_streams.keys().cloned().collect();
         for topic in subscribed_topics {
-            if self.subscriptions.check(topic.as_ref()).is_none() {
+            if !self.subscriptions.check(topic.as_ref()) {
                 self.topic_streams.remove(&topic);
             }
         }
@@ -300,17 +306,8 @@ impl ConnectionHandler {
 
     fn handle_new_topic(&mut self, name: String) {
         // Check if any of our subscription patterns match this new topic
-        match self.subscriptions.check(&name) {
-            Some(pattern) => {
-                // Suppress system topics unless explicitly subscribed
-                let is_system_topic = name.starts_with(config::SYSTEM_TOPIC_PREFIX);
-                let pattern_matches_system = pattern.starts_with(config::SYSTEM_TOPIC_PREFIX);
-
-                if !is_system_topic || pattern_matches_system {
-                    self.subscribe_to_topic(name);
-                }
-            }
-            None => {}
+        if self.subscriptions.check(&name) {
+            self.subscribe_to_topic(name);
         }
     }
 
@@ -481,7 +478,7 @@ impl Adapter for TcpAdapter {
 
 #[derive(Clone)]
 struct MetricsMutator {
-    /// Metrics
+    /// Command throughput
     command_throughput: metrics::ThroughputMutator,
     connection_count: metrics::CountMutator,
     messages_sent: metrics::ThroughputMutator,
@@ -502,9 +499,6 @@ impl Server {
     pub async fn new(port: u16, buffer_config: BufferConfig) -> Result<Server, Box<dyn Error>> {
         let bus = Bus::new();
 
-        // Create system metrics topic
-        bus.create_topic(&format!("{}/metrics", config::SYSTEM_TOPIC_PREFIX));
-
         Ok(Server {
             port,
             bus,
@@ -513,47 +507,14 @@ impl Server {
     }
 
     fn register_metrics(&self) -> MetricsMutator {
-        // Create a wrapper that serializes Message to bytes and sends via Bus
-        let bus = self.bus.clone();
-        let (metrics_tx, mut metrics_rx) = mpsc::channel::<Message>(100);
-
-        tokio::spawn(async move {
-            while let Some(message) = metrics_rx.recv().await {
-                // Serialize the message to bytes
-                match rmp_serde::to_vec(&message) {
-                    Ok(bytes) => {
-                        bus.send(&message.topic, Arc::new(bytes))
-                            .inspect_err(|e| warn!("Failed to send metric - {e}"))
-                            .ok();
-                    }
-                    Err(e) => {
-                        warn!("Failed to serialize metric message - {e}");
-                    }
-                }
-            }
-        });
-
-        // Create a broadcast channel for the metrics
-        let (metrics_sender, _) = broadcast::channel(100);
-        let metrics_sender_clone = metrics_sender.clone();
-
-        // Forward from broadcast to mpsc (for serialization)
-        tokio::spawn(async move {
-            let mut receiver = metrics_sender_clone.subscribe();
-            while let Ok(msg) = receiver.recv().await {
-                metrics_tx.send(msg).await.ok();
-            }
-        });
-
         // Command throughput
         let mut command_throughput = metrics::Throughput::new(
             "commands",
             tokio::time::Duration::from_secs(config::M_COMMANDS_INTERVAL_S),
         );
         let command_throughput_mutator = command_throughput.get_mutator();
-        let sender = metrics_sender.clone();
         tokio::spawn(async move {
-            command_throughput.listen_and_broadcast(sender).await;
+            command_throughput.listen_and_log().await;
         });
 
         // Connections metric
@@ -562,9 +523,8 @@ impl Server {
             tokio::time::Duration::from_secs(config::M_CONNECTIONS_INTERVAL_S),
         );
         let connection_count_mutator = connection_count.get_mutator();
-        let sender = metrics_sender.clone();
         tokio::spawn(async move {
-            connection_count.listen_and_broadcast(sender).await;
+            connection_count.listen_and_log().await;
         });
 
         // Messages sent metric
@@ -572,10 +532,9 @@ impl Server {
             "messages-sent",
             tokio::time::Duration::from_secs(config::M_MESSAGES_SENT_INTERVAL_S),
         );
-        let sender = metrics_sender.clone();
         let messages_sent_mutator = messages_sent.get_mutator();
         tokio::spawn(async move {
-            messages_sent.listen_and_broadcast(sender).await;
+            messages_sent.listen_and_log().await;
         });
 
         MetricsMutator {
@@ -800,7 +759,7 @@ mod tests {
 
         // Check if the new topic matches our subscription pattern
         assert_eq!(topic_name, "sensor.temperature");
-        assert!(subscriptions.check(&topic_name).is_some());
+        assert!(subscriptions.check(&topic_name));
 
         // Subscribe to the topic (this happens AFTER the message was sent)
         // The last_msg should contain the buffered message

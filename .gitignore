@@ -3,3 +3,4 @@ notes.md
 .venv
 .disk-vs-channel-bench
 .rules
+.metrics

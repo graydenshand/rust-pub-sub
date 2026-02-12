@@ -4,6 +4,7 @@ use rmp_serde::Serializer;
 use rmpv::Value;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 use rmp_serde;
 
@@ -26,6 +27,25 @@ pub enum Command {
     Subscribe { pattern: String },
     /// Unsubscribe from a topic
     Unsubscribe { pattern: String },
+}
+impl Command {
+    pub fn log(&self) {
+        match self {
+            Self::Publish { message } => {
+                debug!(
+                    command = "PUBLISH",
+                    topic = message.topic,
+                    value = format!("{:?}", message.value)
+                );
+            }
+            Self::Subscribe { pattern } => {
+                debug!(command = "SUBSCRIBE", pattern = pattern);
+            }
+            Self::Unsubscribe { pattern } => {
+                debug!(command = "UNSUBSCRIBE", pattern = pattern);
+            }
+        }
+    }
 }
 impl fmt::Display for Command {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

@@ -1,5 +1,3 @@
-use std::fmt::format;
-
 use lbroker;
 use lbroker::buffer_config::BufferConfig;
 use rmpv::Value;
